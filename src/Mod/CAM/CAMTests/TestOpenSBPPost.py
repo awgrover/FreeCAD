@@ -160,14 +160,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             "--no-header --precision=2 --no-show-editor",
         )
 
-        # MUST be last, --inches changes a global, which is not reset w/in a test
-        # inches
-        self.compare_first_command(
-            "G0 X10 Y20 Z30", # simple move
-            "J3,0.3937,0.7874,1.1811",
-            "--no-header --no-show-editor --inches"
-        )
-
     def test030(self):
         """
         Test Pre-amble
@@ -202,26 +194,17 @@ MX,22.0000
         Test inches
         """
 
-        c = Path.Command("G0 X10 Y20 Z30")
-        self.docobj.Path = Path.Path([c])
-        postables = [self.docobj]
-
-        args = "--no-header --inches --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode.splitlines()[2], "G20")
-
-        result = gcode.splitlines()[5]
-        expected = "G0 X0.3937 Y0.7874 Z1.1811 "
-        self.assertEqual(result, expected)
-
-        # Technical debt.   The following test fails.  Precision not working
-        # with imperial units.
-
-        # args = ("--no-header --inches --precision=2")
-        # gcode = postprocessor.export(postables, "-", args)
-        # result = gcode.splitlines()[5]
-        # expected = "G0 X0.39 Y0.78 Z1.18 "
-        # self.assertEqual(result, expected)
+        # inches
+        self.compare_first_command(
+            "G0 X10 Y20 Z30", # simple move
+            "J3,0.3937,0.7874,1.1811",
+            "--no-header --no-show-editor --inches"
+        )
+        self.compare_first_command(
+            "G0 X10 Y20 Z30", # simple move
+            "J3,0.39,0.79,1.18",
+            "--no-header --no-show-editor --inches --precision 2"
+        )
 
     def test060(self):
         """
