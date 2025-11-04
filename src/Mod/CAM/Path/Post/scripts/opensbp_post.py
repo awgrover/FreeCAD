@@ -23,7 +23,9 @@
 # *                                                                         *
 # ***************************************************************************
 
+import argparse
 import datetime
+import shlex
 import Path.Post.Utils as PostUtils
 import PathScripts.PathUtils as PathUtils
 from builtins import open as pyopen
@@ -53,16 +55,34 @@ ToDo
 
 """
 
-# oldest style for args, no actual argparse.ArgumentParser
-TOOLTIP_ARGS = """
-Arguments for opensbp:
-    --comments          ... insert comments - mostly for debugging
-    --inches            ... convert output to inches
-    --no-header         ... suppress header output
-    --no-show-editor    ... don't show editor, just save result
-"""
-
 now = datetime.datetime.now()
+
+PRECISION = 4
+
+parser = argparse.ArgumentParser(prog="opensbp", add_help=False)
+parser.add_argument("--no-header", action="store_true", help="suppress header output")
+parser.add_argument("--comments", action="store_true", help="output comments (default=False)", default=False)
+#parser.add_argument("--line-numbers", action="store_true", help="prefix with line numbers")
+parser.add_argument(
+    "--no-show-editor",
+    action="store_true",
+    help="don't pop up editor before writing output",
+)
+parser.add_argument("--precision", default=str(PRECISION), help=f"number of digits of precision, default={PRECISION}")
+parser.add_argument(
+    "--preamble",
+    help='set commands to be issued before the first command, default=None',
+)
+parser.add_argument(
+    "--postamble",
+    help='set commands to be issued after the last command, default=None',
+)
+parser.add_argument(
+    # this should probably be True for most shopbot installations
+    "--inches", action="store_true", help="Convert output for US imperial mode, default=metric"
+)
+
+TOOLTIP_ARGS = parser.format_help()
 
 OUTPUT_COMMENTS = False
 OUTPUT_HEADER = True
@@ -96,24 +116,42 @@ def getImperialValue(val):
 
 
 GetValue = getMetricValue
+FloatPrecision = None # setup in processArguments
 
 
-def export(objectslist, filename, argstring):
+def processArguments(argstring):
+
     global OUTPUT_COMMENTS
     global OUTPUT_HEADER
     global SHOW_EDITOR
-    global CurrentState
+    global PRECISION
+    global PREAMBLE
+    global POSTAMBLE
     global GetValue
+    global FloatPrecision
 
-    for arg in argstring.split():
-        if arg == "--comments":
-            OUTPUT_COMMENTS = True
-        if arg == "--inches":
-            GetValue = getImperialValue
-        if arg == "--no-header":
-            OUTPUT_HEADER = False
-        if arg == "--no-show-editor":
-            SHOW_EDITOR = False
+    args = parser.parse_args(shlex.split(argstring))
+
+    if args.comments:
+        OUTPUT_COMMENTS = True
+    if args.inches:
+        GetValue = getImperialValue
+    if args.no_header:
+        OUTPUT_HEADER = False
+    if args.no_show_editor:
+        SHOW_EDITOR = False
+    if args.precision != None:
+        PRECISION = int(args.precision)
+    FloatPrecision = f".{PRECISION}f" # always set
+    if args.preamble != None:
+        PREAMBLE = int(args.preamble)
+    if args.postamble != None:
+        POSTAMBLE = int(args.postamble)
+
+def export(objectslist, filename, argstring):
+    global CurrentState
+
+    processArguments(argstring)
 
     for obj in objectslist:
         if not hasattr(obj, "Path"):
@@ -234,38 +272,38 @@ def move(command):
 
     if axis == "X":
         txt += pref + "X"
-        txt += "," + format(GetValue(command.Parameters["X"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
         txt += "\n"
     elif axis == "Y":
         txt += pref + "Y"
-        txt += "," + format(GetValue(command.Parameters["Y"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
         txt += "\n"
     elif axis == "Z":
         txt += pref + "Z"
-        txt += "," + format(GetValue(command.Parameters["Z"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
         txt += "\n"
     elif axis == "XY":
         txt += pref + "2"
-        txt += "," + format(GetValue(command.Parameters["X"]), ".4f")
-        txt += "," + format(GetValue(command.Parameters["Y"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
+        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
         txt += "\n"
     elif axis == "XZ":
         txt += pref + "3"
-        txt += "," + format(GetValue(command.Parameters["X"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
         txt += ","
-        txt += "," + format(GetValue(command.Parameters["Z"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
         txt += "\n"
     elif axis == "XYZ":
         txt += pref + "3"
-        txt += "," + format(GetValue(command.Parameters["X"]), ".4f")
-        txt += "," + format(GetValue(command.Parameters["Y"]), ".4f")
-        txt += "," + format(GetValue(command.Parameters["Z"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
+        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
+        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
         txt += "\n"
     elif axis == "YZ":
         txt += pref + "3"
         txt += ","
-        txt += "," + format(GetValue(command.Parameters["Y"]), ".4f")
-        txt += "," + format(GetValue(command.Parameters["Z"]), ".4f")
+        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
+        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
         txt += "\n"
     elif axis == "":
         print("warning: skipping duplicate move.")
@@ -283,10 +321,10 @@ def arc(command):
     else:  # G3 means CCW
         dirstring = "-1"
     txt = "CG,,"
-    txt += format(GetValue(command.Parameters["X"]), ".4f") + ","
-    txt += format(GetValue(command.Parameters["Y"]), ".4f") + ","
-    txt += format(GetValue(command.Parameters["I"]), ".4f") + ","
-    txt += format(GetValue(command.Parameters["J"]), ".4f") + ","
+    txt += format(GetValue(command.Parameters["X"]), FloatPrecision) + ","
+    txt += format(GetValue(command.Parameters["Y"]), FloatPrecision) + ","
+    txt += format(GetValue(command.Parameters["I"]), FloatPrecision) + ","
+    txt += format(GetValue(command.Parameters["J"]), FloatPrecision) + ","
     txt += "T" + ","
     txt += dirstring
     txt += "\n"
