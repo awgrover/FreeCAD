@@ -82,12 +82,17 @@ parser.add_argument(
     # this should probably be True for most shopbot installations
     "--inches", action="store_true", help="Convert output for US imperial mode, default=metric"
 )
+parser.add_argument(
+    # this should probably be True for most shopbot installations
+    "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
+)
 
 TOOLTIP_ARGS = parser.format_help()
 
 OUTPUT_COMMENTS = False
 OUTPUT_HEADER = True
 SHOW_EDITOR = True
+DEGREES_FOR_AB = True # False will treat as metric/inches
 COMMAND_SPACE = ","
 
 # Preamble text will appear at the beginning of the GCODE output file.
@@ -130,6 +135,7 @@ def processArguments(argstring):
     global POSTAMBLE
     global GetValue
     global FloatPrecision
+    global DEGREES_FOR_AB
 
     args = parser.parse_args(shlex.split(argstring))
 
@@ -148,6 +154,8 @@ def processArguments(argstring):
         PREAMBLE = args.preamble.replace('\\n','\n')
     if args.postamble != None:
         POSTAMBLE = args.postamble.replace('\\n','\n')
+    if args.ab_is_distance:
+        DEGREES_FOR_AB = False
 
 def export(objectslist, filename, argstring):
     global CurrentState
@@ -165,6 +173,9 @@ def export(objectslist, filename, argstring):
         "X": 0,
         "Y": 0,
         "Z": 0,
+        "A": 0,
+        "B": 0,
+        "C": None, "U": None, "V": None, "W": None, # axis not available
         "F": 0,
         "S": 0,
         "JSXY": 0,
@@ -189,7 +200,6 @@ def export(objectslist, filename, argstring):
         # one gcode
         # e.g. str_to_gcode("G0 X50")
         pc = Path.Command()
-        print(f"### pc.setFromGCode('{s}')")
         try:
             pc.setFromGCode(s)
         except ValueError as e:
@@ -253,7 +263,7 @@ def move(command):
     #     txt += feedrate(command)
 
     axis = ""
-    for p in ["X", "Y", "Z"]:
+    for p in ["X", "Y", "Z", "A", "B", "C", "U", "V", "W"]: # can't do CUVW
         if p in command.Parameters:
             if command.Parameters[p] != CurrentState[p]:
                 axis += p
@@ -278,6 +288,10 @@ def move(command):
             if CurrentState[speedKey] != speedVal:
                 CurrentState[speedKey] = speedVal
                 xyspeed = "{:f}".format(speedVal)
+
+        if "A" in axis or "B" in axis:
+            print("WARNING: we aren't handling speed for A and B axis...")
+
         if zspeed or xyspeed:
             txt += "{},{},{}\n".format(movetype, xyspeed, zspeed)
 
@@ -286,47 +300,41 @@ def move(command):
     else:
         pref = "M"
 
-    if axis == "X":
-        txt += pref + "X"
-        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
-        txt += "\n"
-    elif axis == "Y":
-        txt += pref + "Y"
-        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
-        txt += "\n"
-    elif axis == "Z":
-        txt += pref + "Z"
-        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
+    if len(axis) == 1:
+        # axis string is key and command-second-letter
+        txt += pref + axis
+        if axis in ['A','B'] and DEGREES_FOR_AB:
+            txt += "," + format(command.Parameters[axis], FloatPrecision)
+        else:
+            txt += "," + format(GetValue(command.Parameters[axis]), FloatPrecision)
         txt += "\n"
     elif axis == "XY":
         txt += pref + "2"
         txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
         txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
         txt += "\n"
-    elif axis == "XZ":
+    elif axis in [ "XZ", "YZ", "XYZ" ]:
+        # anything plus Z requires the 3 arg version
         txt += pref + "3"
-        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
-        txt += ","
-        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
+        for key in ['X','Y','Z']:
+            txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
         txt += "\n"
-    elif axis == "XYZ":
-        txt += pref + "3"
-        txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
-        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
-        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
-        txt += "\n"
-    elif axis == "YZ":
-        txt += pref + "3"
-        txt += ","
-        txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
-        txt += "," + format(GetValue(command.Parameters["Z"]), FloatPrecision)
+    elif ('A' in axis or 'B' in axis) and len(axis)>1 and not next( ( c for c in 'CUVW' if c in axis), None):
+        # AB+ needs "5" version (carefully excluding CUVW)
+        # we could optimize to an M4 if just A
+        txt += pref + "5"
+        for key in ['X','Y','Z','A','B']:
+            if key in ['A','B'] and DEGREES_FOR_AB:
+                txt += "," + format(command.Parameters[key], FloatPrecision) if key in axis else ''
+            else:
+                txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
         txt += "\n"
     elif axis == "":
         print("warning: skipping duplicate move.")
     else:
         print(CurrentState)
         print(command)
-        print("I don't know how to handle '{}' for a move.".format(axis))
+        print(f"I don't know how to handle '{axis}' for a move.")
 
     return txt
 

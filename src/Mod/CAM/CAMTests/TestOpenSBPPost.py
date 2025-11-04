@@ -100,7 +100,13 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         gcode = postprocessor.export(postables, "-", args)
         if debug:
             print(f"--------{nl}{gcode}--------{nl}")
-        self.assertEqual(gcode.splitlines()[first_command], expected)
+
+        if expected==None:
+            self.assertEqual(gcode, "")
+        else:
+            lines = gcode.splitlines()
+            self.assertGreater( len(lines), first_command ) # need at least first_command+1 lines
+            self.assertEqual(lines[first_command], expected)
 
     def test000(self):
         """Test Output Generation.
@@ -295,47 +301,79 @@ PAUSE
     def test100(self):
         """Test A, B, & C axis output for values between 0 and 90 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A40 B50 C60",
-            "G1 X10.000 Y20.000 Z30.000 A40.000 B50.000 C60.000 ",
+            "G1 X10 Y20 Z30 A40 B50",
+            "M5,10.0000,20.0000,30.0000,40.0000,50.0000",
+            #"G1 X10.000 Y20.000 Z30.000 A40.000 B50.000 C60.000 ",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A40 B50 C60",
-            "G1 X0.3937 Y0.7874 Z1.1811 A40.0000 B50.0000 C60.0000 ",
+            "G1 X10 Y20 Z30 A40 B50 C10",
+            None, # we don't do C
+            "--no-header --no-show-editor",
+        )
+        self.compare_first_command(
+            "G1 X10 Y20 Z30 A40 B50",
+            "M5,0.3937,0.7874,1.1811,40.0000,50.0000",
             "--no-header --inches --no-show-editor",
+        )
+
+    def test105(self):
+        """Test A, B axis output for distance, not degrees"""
+
+        # only noticeable for --inches
+
+        self.compare_first_command(
+            "G1 X10 Y20 Z30 A40 B50",
+            "M5,0.3937,0.7874,1.1811,40.0000,50.0000",
+            "--no-header --inches --no-show-editor",
+        )
+
+        self.compare_first_command(
+            "G1 X10 Y20 Z30 A40 B50",
+            "M5,0.3937,0.7874,1.1811,1.5748,1.9685",
+            "--no-header --no-show-editor --inches --ab-is-distance",
         )
 
     def test110(self):
         """Test A, B, & C axis output for 89 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A89 B89 C89",
-            "G1 X10.000 Y20.000 Z30.000 A89.000 B89.000 C89.000 ",
+            "G1 X10 Y20 Z30 A89 B89",
+            "M5,10.0000,20.0000,30.0000,89.0000,89.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A89 B89 C89",
-            "G1 X0.3937 Y0.7874 Z1.1811 A89.0000 B89.0000 C89.0000 ",
+            "G1 X10 Y20 Z30 A89 B89",
+            "M5,0.3937,0.7874,1.1811,89.0000,89.0000",
             "--no-header --inches --no-show-editor",
         )
 
+    # 90+ is broken
+
     def test120(self):
-        """Test A, B, & C axis output for 90 degrees"""
+        """Test A, B axis output for 90 degrees"""
+
+        # BREAKS:
+        # parses the gcode to {'A': 0.0, 'B': 90.0, 'X': 10.0, 'Y': 20.0, 'Z': 30.0}
+        # Note the A==0
+
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A90 B90 C90",
-            "G1 X10.000 Y20.000 Z30.000 A90.000 B90.000 C90.000 ",
+            "G1 X10 Y20 Z30 A90 B90",
+            "M5,10.0000,20.0000,30.0000,90.0000,90.0000",
             "--no-header --no-show-editor",
+            debug=True
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A90 B90 C90",
-            "G1 X0.3937 Y0.7874 Z1.1811 A90.0000 B90.0000 C90.0000 ",
+            "G1 X10 Y20 Z30 A90 B90",
+            "M5,0.3937,0.7874,1.1811,90.0000,90.0000",
             "--no-header --inches --no-show-editor",
         )
 
     def test130(self):
         """Test A, B, & C axis output for 91 degrees"""
+
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A91 B91 C91",
-            "G1 X10.000 Y20.000 Z30.000 A91.000 B91.000 C91.000 ",
+            "G1 X10 Y20 Z30 A91 B91",
+            "M5,10.0000,20.0000,30.0000,90.0000,90.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -386,13 +424,13 @@ PAUSE
     def test170(self):
         """Test A, B, & C axis output for values between 0 and -90 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-40 B-50 C-60",
-            "G1 X10.000 Y20.000 Z30.000 A-40.000 B-50.000 C-60.000 ",
+            "G1 X10 Y20 Z30 A-40 B-50",
+            "M5,10.0000,20.0000,30.0000,-40.0000,-50.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-40 B-50 C-60",
-            "G1 X0.3937 Y0.7874 Z1.1811 A-40.0000 B-50.0000 C-60.0000 ",
+            "G1 X10 Y20 Z30 A-40 B-50",
+            "M5,0.3937,0.7874,1.1811,-40.0000,-50.0000",
             "--no-header --inches --no-show-editor",
         )
 
