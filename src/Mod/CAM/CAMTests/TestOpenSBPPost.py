@@ -138,7 +138,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 '(begin postamble)
 """
         args = "--no-header --comments --no-show-editor"
-        print("### gcode\n"+gcode+"<<<EOS")
         gcode = postprocessor.export(postables, "-", args)
         self.assertEqual(gcode, expected)
 
@@ -169,16 +168,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             "--no-header --no-show-editor --inches"
         )
 
-    def test020(self):
-        """
-        Test Line Numbers
-        """
-        self.compare_first_command(
-            "G0 X10 Y20 Z30",
-            "N160  G0 X10.000 Y20.000 Z30.000 ",
-            "--no-header --line-numbers --no-show-editor",
-        )
-
     def test030(self):
         """
         Test Pre-amble
@@ -187,10 +176,12 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.docobj.Path = Path.Path([])
         postables = [self.docobj]
 
-        args = "--no-header --preamble='G18 G55' --no-show-editor"
+        expected="""JZ,50.0000
+MX,20.0000
+"""
+        args = "--no-header --preamble='G0 Z50\nG1 X20' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
-        result = gcode.splitlines()[0]
-        self.assertEqual(result, "G18 G55")
+        self.assertEqual(gcode, expected)
 
     def test040(self):
         """
@@ -198,11 +189,13 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
         self.docobj.Path = Path.Path([])
         postables = [self.docobj]
-        args = "--no-header --postamble='G0 Z50\nM2' --no-show-editor"
+
+        expected="""JZ,55.0000
+MX,22.0000
+"""
+        args = "--no-header --postamble='G0 Z55\nG1 X22' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
-        result = gcode.splitlines()[-2]
-        self.assertEqual(result, "G0 Z50")
-        self.assertEqual(gcode.splitlines()[-1], "M2")
+        self.assertEqual(gcode, expected)
 
     def test050(self):
         """

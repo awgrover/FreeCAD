@@ -26,6 +26,7 @@
 import argparse
 import datetime
 import shlex
+import Path
 import Path.Post.Utils as PostUtils
 import PathScripts.PathUtils as PathUtils
 from builtins import open as pyopen
@@ -71,11 +72,11 @@ parser.add_argument(
 parser.add_argument("--precision", default=str(PRECISION), help=f"number of digits of precision, default={PRECISION}")
 parser.add_argument(
     "--preamble",
-    help='set commands to be issued before the first command, default=None',
+    help='set g-code commands to be issued before the first command, multi-line g-code w/ \\n, default=None',
 )
 parser.add_argument(
     "--postamble",
-    help='set commands to be issued after the last command, default=None',
+    help='set g-code commands to be issued after the last command, multi-line g-code w/ \\n, default=None',
 )
 parser.add_argument(
     # this should probably be True for most shopbot installations
@@ -144,9 +145,9 @@ def processArguments(argstring):
         PRECISION = int(args.precision)
     FloatPrecision = f".{PRECISION}f" # always set
     if args.preamble != None:
-        PREAMBLE = int(args.preamble)
+        PREAMBLE = args.preamble.replace('\\n','\n')
     if args.postamble != None:
-        POSTAMBLE = int(args.postamble)
+        POSTAMBLE = args.postamble.replace('\\n','\n')
 
 def export(objectslist, filename, argstring):
     global CurrentState
@@ -183,8 +184,23 @@ def export(objectslist, filename, argstring):
     # Write the preamble
     if OUTPUT_COMMENTS:
         gcode += linenumber() + "'(begin preamble)\n"
-    for line in PREAMBLE.splitlines(True):
-        gcode += linenumber() + line
+
+    def str_to_gcode(s):
+        # one gcode
+        # e.g. str_to_gcode("G0 X50")
+        pc = Path.Command()
+        print(f"### pc.setFromGCode('{s}')")
+        try:
+            pc.setFromGCode(s)
+        except ValueError as e:
+            # can't tell if it is really 'Badly formatted GCode argument', so just add our gcode to the message
+            raise ValueError(f"{e.args[0]}: {s}", *(e.args[1:]))
+        return pc
+
+    if PREAMBLE:
+        preamble_lines = PREAMBLE.replace('\\n','\n').splitlines(False)
+        preamble_commands = [ str_to_gcode(x) or pc for x  in preamble_lines ]
+        gcode += parse_list_of_commands( preamble_commands )
 
     for obj in objectslist:
 
@@ -205,8 +221,11 @@ def export(objectslist, filename, argstring):
     # do the post_amble
     if OUTPUT_COMMENTS:
         gcode += "'(begin postamble)\n"
-    for line in POSTAMBLE.splitlines(True):
-        gcode += linenumber() + line
+
+    if POSTAMBLE:
+        postamble_lines = POSTAMBLE.replace('\\n','\n').splitlines(False)
+        postamble_commands = [ str_to_gcode(x) or pc for x  in postamble_lines ]
+        gcode += parse_list_of_commands( postamble_commands )
 
     if SHOW_EDITOR:
         dia = PostUtils.GCodeEditorDialog()
@@ -394,17 +413,22 @@ def parse(pathobj):
             return output
         if OUTPUT_COMMENTS:
             output += linenumber() + "'(Path: " + pathobj.Label + ")\n"
-        for c in PathUtils.getPathWithPlacement(pathobj).Commands:
-            command = c.Name
-            if command in scommands:
-                output += scommands[command](c)
-                if c.Parameters:
-                    CurrentState.update(c.Parameters)
-            elif command.startswith("("):
-                output += "' " + command + "\n"
-            else:
-                print("I don't know what the hell the command: ", end="")
-                print(command + " means.  Maybe I should support it.")
+        output += parse_list_of_commands( PathUtils.getPathWithPlacement(pathobj).Commands )
+    return output
+
+def parse_list_of_commands(commands):
+    output = ""
+    for c in commands:
+        command = c.Name
+        if command in scommands:
+            output += scommands[command](c)
+            if c.Parameters:
+                CurrentState.update(c.Parameters)
+        elif command.startswith("("):
+            output += "' " + command + "\n"
+        else:
+            print("I don't know what the command: ", end="")
+            print(command + " means.  Maybe I should support it.")
     return output
 
 
