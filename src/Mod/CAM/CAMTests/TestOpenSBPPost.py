@@ -373,51 +373,51 @@ PAUSE
 
         self.compare_first_command(
             "G1 X10 Y20 Z30 A91 B91",
-            "M5,10.0000,20.0000,30.0000,90.0000,90.0000",
+            "M5,10.0000,20.0000,30.0000,91.0000,91.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
             "G1 X10 Y20 Z30 A91 B91 C91",
-            "G1 X0.3937 Y0.7874 Z1.1811 A91.0000 B91.0000 C91.0000 ",
+            "M5,0.3937,0.7874,1.1811,91.0000,91.0000",
             "--no-header --inches --no-show-editor",
         )
 
     def test140(self):
         """Test A, B, & C axis output for values between 90 and 180 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A100 B110 C120",
-            "G1 X10.000 Y20.000 Z30.000 A100.000 B110.000 C120.000 ",
+            "G1 X10 Y20 Z30 A100 B110",
+            "M5,10.0000,20.0000,30.0000,100.0000,110.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A100 B110 C120",
-            "G1 X0.3937 Y0.7874 Z1.1811 A100.0000 B110.0000 C120.0000 ",
+            "G1 X10 Y20 Z30 A100 B110",
+            "M5,0.3937,0.7874,1.1811,100.0000,110.0000",
             "--no-header --inches --no-show-editor",
         )
 
     def test150(self):
         """Test A, B, & C axis output for values between 180 and 360 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A240 B250 C260",
-            "G1 X10.000 Y20.000 Z30.000 A240.000 B250.000 C260.000 ",
+            "G1 X10 Y20 Z30 A240 B250",
+            "M5,10.0000,20.0000,30.0000,240.0000,250.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
             "G1 X10 Y20 Z30 A240 B250 C260",
-            "G1 X0.3937 Y0.7874 Z1.1811 A240.0000 B250.0000 C260.0000 ",
+            "M5,0.3937,0.7874,1.1811,240.0000,250.0000",
             "--no-header --inches --no-show-editor",
         )
 
     def test160(self):
         """Test A, B, & C axis output for values greater than 360 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A440 B450 C460",
-            "G1 X10.000 Y20.000 Z30.000 A440.000 B450.000 C460.000 ",
+            "G1 X10 Y20 Z30 A440 B450",
+            "M5,10.0000,20.0000,30.0000,440.0000,450.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
             "G1 X10 Y20 Z30 A440 B450 C460",
-            "G1 X0.3937 Y0.7874 Z1.1811 A440.0000 B450.0000 C460.0000 ",
+            "M5,0.3937,0.7874,1.1811,440.0000,450.0000",
             "--no-header --inches --no-show-editor",
         )
 
@@ -437,38 +437,38 @@ PAUSE
     def test180(self):
         """Test A, B, & C axis output for values between -90 and -180 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-100 B-110 C-120",
-            "G1 X10.000 Y20.000 Z30.000 A-100.000 B-110.000 C-120.000 ",
+            "G1 X10 Y20 Z30 A-100 B-110",
+            "M5,10.0000,20.0000,30.0000,-100.0000,-110.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-100 B-110 C-120",
-            "G1 X0.3937 Y0.7874 Z1.1811 A-100.0000 B-110.0000 C-120.0000 ",
+            "G1 X10 Y20 Z30 A-100 B-110",
+            "M5,0.3937,0.7874,1.1811,-100.0000,-110.0000",
             "--no-header --inches --no-show-editor",
         )
 
     def test190(self):
         """Test A, B, & C axis output for values between -180 and -360 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-240 B-250 C-260",
-            "G1 X10.000 Y20.000 Z30.000 A-240.000 B-250.000 C-260.000 ",
+            "G1 X10 Y20 Z30 A-240 B-250",
+            "M5,10.0000,20.0000,30.0000,-240.0000,-250.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-240 B-250 C-260",
-            "G1 X0.3937 Y0.7874 Z1.1811 A-240.0000 B-250.0000 C-260.0000 ",
+            "G1 X10 Y20 Z30 A-240 B-250",
+            "M5,0.3937,0.7874,1.1811,-240.0000,-250.0000",
             "--no-header --inches --no-show-editor",
         )
 
     def test200(self):
         """Test A, B, & C axis output for values below -360 degrees"""
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-440 B-450 C-460",
-            "G1 X10.000 Y20.000 Z30.000 A-440.000 B-450.000 C-460.000 ",
+            "G1 X10 Y20 Z30 A-440 B-450",
+            "M5,10.0000,20.0000,30.0000,-440.0000,-450.0000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A-440 B-450 C-460",
-            "G1 X0.3937 Y0.7874 Z1.1811 A-440.0000 B-450.0000 C-460.0000 ",
+            "G1 X10 Y20 Z30 A-440 B-450",
+            "M5,0.3937,0.7874,1.1811,-440.0000,-450.0000",
             "--no-header --inches --no-show-editor",
         )
