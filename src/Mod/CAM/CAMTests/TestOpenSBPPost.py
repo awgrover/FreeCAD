@@ -217,28 +217,41 @@ MX,22.0000
         self.docobj.Path = Path.Path([c, c1])
         postables = [self.docobj]
 
-        args = "--no-header --modal --no-show-editor"
+        args = "--no-header --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
-        result = gcode.splitlines()[6]
-        expected = "X10.000 Y30.000 Z30.000 "
-        self.assertEqual(result, expected)
+        expected = "J3,10.0000,20.0000,30.0000"
+        self.assertEqual(gcode, expected)
 
     def test070(self):
         """
-        Test axis modal
         Suppress the axis coordinate if the same as previous
         """
+        # diff y
         c = Path.Command("G0 X10 Y20 Z30")
         c1 = Path.Command("G0 X10 Y30 Z30")
 
         self.docobj.Path = Path.Path([c, c1])
         postables = [self.docobj]
 
-        args = "--no-header --axis-modal --no-show-editor"
+        args = "--no-header --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
-        result = gcode.splitlines()[6]
-        expected = "G0 Y30.000 "
-        self.assertEqual(result, expected)
+        expected = """J3,10.0000,20.0000,30.0000
+JY,30.0000
+"""
+        self.assertEqual(gcode, expected)
+
+        # diff z
+        c1 = Path.Command("G0 X10 Y20 Z40")
+
+        self.docobj.Path = Path.Path([c, c1])
+        postables = [self.docobj]
+
+        args = "--no-header --no-show-editor"
+        gcode = postprocessor.export(postables, "-", args)
+        expected = """J3,10.0000,20.0000,30.0000
+JZ,40.0000
+"""
+        self.assertEqual(gcode, expected)
 
     def test080(self):
         """
@@ -251,15 +264,15 @@ MX,22.0000
 
         args = "--no-header --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode.splitlines()[5], "M5")
-        self.assertEqual(gcode.splitlines()[6], "M6 T2 ")
-        self.assertEqual(gcode.splitlines()[7], "G43 H2 ")
-        self.assertEqual(gcode.splitlines()[8], "M3 S3000 ")
-
-        # suppress TLO
-        args = "--no-header --no-tlo --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode.splitlines()[7], "M3 S3000 ")
+        expect="""&ToolName=2
+&Tool=2
+'Change tool to 2
+PAUSE
+TR,3000
+'Change spindle speed to 3000
+PAUSE
+"""
+        self.assertEqual(gcode, expect)
 
     def test090(self):
         """

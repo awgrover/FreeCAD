@@ -358,8 +358,9 @@ def tool_change(command):
         txt += line
     txt += "&ToolName=" + str(int(command.Parameters["T"]))
     txt += "\n"
-    txt += "&Tool=" + str(int(command.Parameters["T"]))
-    txt += "\n"
+    txt += f"&Tool={int(command.Parameters['T'])}\n"
+    txt += f"'Change tool to {int(command.Parameters['T'])}\n"
+    txt += "PAUSE\n" # causes a modal to ask "ok?"
     return txt
 
 
@@ -374,9 +375,11 @@ def spindle(command):
         pass
     else:
         pass
-    txt += "TR," + str(command.Parameters["S"]) + "\n"
-    txt += "C6\n"
-    txt += "PAUSE 2\n"
+    txt += f"TR,{int(command.Parameters['S'])}\n"
+    #txt += "C6\n" a custom cut 6, from the menu
+    txt += f"'Change spindle speed to {int(command.Parameters['S'])}\n"
+    txt += "PAUSE\n" # causes a modal to ask "ok?"
+
     return txt
 
 
