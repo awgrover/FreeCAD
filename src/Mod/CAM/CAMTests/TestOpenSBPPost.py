@@ -278,7 +278,19 @@ PAUSE
         """
         Test comment
         """
-        self.compare_first_command("(comment)", "(comment) ", "--no-header --no-show-editor")
+        expected="""'(begin preamble)
+'(begin operation: testpath)
+'(Path: testpath)
+'comment
+'(finish operation: testpath)
+'(begin postamble)
+"""
+        c = Path.Command("(comment)")
+        self.docobj.Path = Path.Path([c])
+        postables = [self.docobj]
+        args = "--no-header --comments  --no-show-editor"
+        gcode = postprocessor.export(postables, "-", args)
+        self.assertEqual(gcode, expected)
 
     def test100(self):
         """Test A, B, & C axis output for values between 0 and 90 degrees"""

@@ -177,13 +177,13 @@ def export(objectslist, filename, argstring):
 
     # write header
     if OUTPUT_HEADER:
+        # not using comment(), the option overrides --comments for the header
         gcode += linenumber() + "'Exported by FreeCAD\n"
         gcode += linenumber() + "'Post Processor: " + __name__ + "\n"
         gcode += linenumber() + "'Output Time:" + str(now) + "\n"
 
     # Write the preamble
-    if OUTPUT_COMMENTS:
-        gcode += linenumber() + "'(begin preamble)\n"
+    gcode += comment("(begin preamble)", True)
 
     def str_to_gcode(s):
         # one gcode
@@ -205,22 +205,19 @@ def export(objectslist, filename, argstring):
     for obj in objectslist:
 
         # do the pre_op
-        if OUTPUT_COMMENTS:
-            gcode += linenumber() + "'(begin operation: " + obj.Label + ")\n"
+        gcode += comment(f"(begin operation: {obj.Label})", True)
         for line in PRE_OPERATION.splitlines(True):
             gcode += linenumber() + line
 
         gcode += parse(obj)
 
         # do the post_op
-        if OUTPUT_COMMENTS:
-            gcode += linenumber() + "'(finish operation: " + obj.Label + ")\n"
+        gcode += comment(f"(finish operation: {obj.Label})", True)
         for line in POST_OPERATION.splitlines(True):
             gcode += linenumber() + line
 
     # do the post_amble
-    if OUTPUT_COMMENTS:
-        gcode += "'(begin postamble)\n"
+    gcode += comment("(begin postamble)", True)
 
     if POSTAMBLE:
         postamble_lines = POSTAMBLE.replace('\\n','\n').splitlines(False)
@@ -352,21 +349,25 @@ def arc(command):
 
 def tool_change(command):
     txt = ""
-    if OUTPUT_COMMENTS:
-        txt += "'a tool change happens now\n"
+    txt += comment("(tool change)", True)
     for line in TOOL_CHANGE.splitlines(True):
         txt += line
     txt += "&ToolName=" + str(int(command.Parameters["T"]))
     txt += "\n"
     txt += f"&Tool={int(command.Parameters['T'])}\n"
-    txt += f"'Change tool to {int(command.Parameters['T'])}\n"
+    txt += f"'Change tool to {int(command.Parameters['T'])}\n" # prompt
     txt += "PAUSE\n" # causes a modal to ask "ok?"
     return txt
 
 
-def comment(command):
-    print("a comment", command)
-    return
+def comment(command, keepparens=False):
+    # comments from gcode are stripped of ()
+    # comments we generate include ()
+    if OUTPUT_COMMENTS:
+        return f"'{command if keepparens else command[1:-1]}\n"
+    else:
+        print("a comment", command)
+        return ''
 
 
 def spindle(command):
@@ -377,7 +378,7 @@ def spindle(command):
         pass
     txt += f"TR,{int(command.Parameters['S'])}\n"
     #txt += "C6\n" a custom cut 6, from the menu
-    txt += f"'Change spindle speed to {int(command.Parameters['S'])}\n"
+    txt += f"'Change spindle speed to {int(command.Parameters['S'])}\n" # prompt
     txt += "PAUSE\n" # causes a modal to ask "ok?"
 
     return txt
@@ -406,16 +407,14 @@ def parse(pathobj):
     # Above list controls the order of parameters
 
     if hasattr(pathobj, "Group"):  # We have a compound or project.
-        if OUTPUT_COMMENTS:
-            output += linenumber() + "'(compound: " + pathobj.Label + ")\n"
+        output += comment(f"(compound: {pathobj.Label})", True)
         for p in pathobj.Group:
             output += parse(p)
     else:  # parsing simple path
         # groups might contain non-path things like stock.
         if not hasattr(pathobj, "Path"):
             return output
-        if OUTPUT_COMMENTS:
-            output += linenumber() + "'(Path: " + pathobj.Label + ")\n"
+        output += comment(f"(Path: {pathobj.Label})", True)
         output += parse_list_of_commands( PathUtils.getPathWithPlacement(pathobj).Commands )
     return output
 
@@ -428,7 +427,7 @@ def parse_list_of_commands(commands):
             if c.Parameters:
                 CurrentState.update(c.Parameters)
         elif command.startswith("("):
-            output += "' " + command + "\n"
+            output += comment(command)
         else:
             print("I don't know what the command: ", end="")
             print(command + " means.  Maybe I should support it.")
