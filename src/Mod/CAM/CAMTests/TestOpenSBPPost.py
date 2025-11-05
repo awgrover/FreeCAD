@@ -34,7 +34,7 @@ Path.Log.trackModule(Path.Log.thisModule())
 
 
 class TestOpenSBPPost(PathTestUtils.PathTestBase):
-    """NB: the post-processor has globals, 
+    """NB: the post-processor has globals,
         which are not reset for each .assertX,
         e.g. for the arguments.
         So, you have to deal with state, e.g. --inches is persistent till the next testX()
@@ -152,11 +152,9 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.assertEqual(gcode, expected)
 
         # With comments
-        expected="""'(begin preamble)
-'(begin operation: testpath)
+        expected="""'(begin operation: testpath)
 '(Path: testpath)
 '(finish operation: testpath)
-'(begin postamble)
 """
         args = "--no-header --comments --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
@@ -179,6 +177,24 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             "G0 X10 Y20 Z30",
             "J3,10.00,20.00,30.00",
             "--no-header --precision=2 --no-show-editor",
+        )
+
+        self.compare_first_command(
+            "G0 X10 Y20 Z30",
+            "J3,0.3937,0.7874,1.1811",
+            "--no-header --inches --no-show-editor",
+        )
+        self.compare_first_command(
+            "G0 X10 Y20 Z30",
+            "J3,0.39,0.79,1.18",
+            "--no-header --inches --precision=2 --no-show-editor",
+        )
+
+        # override as --metric
+        self.compare_first_command(
+            "G0 X10 Y20 Z30",
+            "J3,10.000,20.000,30.000",
+            "--no-header --metric --precision=3 --no-show-editor",
         )
 
     def test030(self):
@@ -300,27 +316,32 @@ PAUSE
         """
         Test comment
         """
-        expected="""'(begin preamble)
-'(begin operation: testpath)
+
+        # we've always been no-comments default
+        self.multi_compare( "(comment)",
+            "--no-header --no-show-editor",
+            ""
+        )
+
+        self.multi_compare( "(comment)",
+            "--no-header --comments --no-show-editor",
+            """'(begin operation: testpath)
 '(Path: testpath)
 'comment
 '(finish operation: testpath)
-'(begin postamble)
 """
-        c = Path.Command("(comment)")
-        self.docobj.Path = Path.Path([c])
-        postables = [self.docobj]
-        args = "--no-header --comments  --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        print(f"### gcode {gcode}")
-        self.assertEqual(gcode, expected)
+        )
+
+        self.multi_compare( "(comment)",
+            "--no-header --no-comments --no-show-editor",
+            ""
+        )
 
     def test100(self):
         """Test A, B, & C axis output for values between 0 and 90 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A40 B50",
             "M5,10.0000,20.0000,30.0000,40.0000,50.0000",
-            #"G1 X10.000 Y20.000 Z30.000 A40.000 B50.000 C60.000 ",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -488,4 +509,34 @@ PAUSE
             "G1 X10 Y20 Z30 A-440 B-450",
             "M5,0.3937,0.7874,1.1811,-440.0000,-450.0000",
             "--no-header --inches --no-show-editor",
+        )
+
+    def test210(self):
+        """Test return-to"""
+
+        # return-to is before postamble
+        self.multi_compare("",
+            "--postamble 'G0 X1 Y2 Z3' --return-to='12,34,56' --no-header --no-show-editor",
+            """J3,12.0000,34.0000,56.0000
+J3,1.0000,2.0000,3.0000
+"""
+        )
+
+        # allow empty ,
+        self.multi_compare("",
+            "--postamble 'G0 X1 Y2 Z3' --return-to=',34,56' --no-header --no-show-editor",
+            """J3,34.0000,56.0000
+J3,1.0000,2.0000,3.0000
+"""
+        )
+
+    def test220(self):
+        """Test native-postamble"""
+
+        # return-to is before postamble
+        self.multi_compare("",
+            "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim' --no-header --no-show-editor",
+            """J3,1.0000,2.0000,3.0000
+verbatim
+"""
         )

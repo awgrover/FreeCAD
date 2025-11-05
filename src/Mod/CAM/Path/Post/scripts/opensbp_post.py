@@ -61,26 +61,36 @@ now = datetime.datetime.now()
 PRECISION = 4
 
 parser = argparse.ArgumentParser(prog="opensbp", add_help=False)
-parser.add_argument("--no-header", action="store_true", help="suppress header output")
-parser.add_argument("--comments", action="store_true", help="output comments (default=False)", default=False)
-#parser.add_argument("--line-numbers", action="store_true", help="prefix with line numbers")
+parser.add_argument("--header", action=argparse.BooleanOptionalAction, help="include header output. deafault=True", default=True)
+parser.add_argument("--comments", action=argparse.BooleanOptionalAction, help="output comments (default=False)")
+# opensbp can't do --line-numbers
 parser.add_argument(
-    "--no-show-editor",
-    action="store_true",
+    "--show-editor",
+    action=argparse.BooleanOptionalAction,
     help="don't pop up editor before writing output",
+    default=True
 )
 parser.add_argument("--precision", default=str(PRECISION), help=f"number of digits of precision, default={PRECISION}")
 parser.add_argument(
     "--preamble",
     help='set g-code commands to be issued before the first command, multi-line g-code w/ \\n, default=None',
 )
+parser.add_argument("--return-to", help="Move to x,y,z,a,b coordinates at the end (before postamble), e.g --return-to 0,0. empty for an axis, or omit trailing to not move in that axis. default is don't return-to")
 parser.add_argument(
     "--postamble",
     help='set g-code commands to be issued after the last command, multi-line g-code w/ \\n, default=None',
 )
 parser.add_argument(
+    "--native-postamble",
+    help='verbatim opensbp commands to be issued after the last command, multi-line w/ \\n. After postamble. Consider a "Cn" or "FB". default=None',
+)
+parser.add_argument(
+    # nb, no default (so --inches and allow --inches --metric)
+    "--metric", action="store_true", help="Convert output for US imperial mode, default"
+)
+parser.add_argument(
     # this should probably be True for most shopbot installations
-    "--inches", action="store_true", help="Convert output for US imperial mode, default=metric"
+    "--inches", action="store_true", help="Convert output for US imperial mode, default=metric", default=False
 )
 parser.add_argument(
     # this should probably be True for most shopbot installations
@@ -88,20 +98,10 @@ parser.add_argument(
 )
 parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
 parser.add_argument("--modal", action=argparse.BooleanOptionalAction, help="Shorten output when a modal command repeats for no effect", default=False)
+
 Arguments = None # updated at export() time with parser.parse_args
 
 TOOLTIP_ARGS = parser.format_help()
-
-OUTPUT_COMMENTS = False
-OUTPUT_HEADER = True
-SHOW_EDITOR = True
-DEGREES_FOR_AB = True # False will treat as metric/inches
-COMMAND_SPACE = ","
-
-# Preamble text will appear at the beginning of the GCODE output file.
-PREAMBLE = """"""
-# Postamble text will appear following the last operation.
-POSTAMBLE = """"""
 
 # Pre operation text will be inserted before every operation
 PRE_OPERATION = """"""
@@ -130,36 +130,23 @@ FloatPrecision = None # setup in processArguments
 
 def processArguments(argstring):
 
-    global OUTPUT_COMMENTS
-    global OUTPUT_HEADER
-    global SHOW_EDITOR
     global PRECISION
-    global PREAMBLE
-    global POSTAMBLE
     global GetValue
     global FloatPrecision
-    global DEGREES_FOR_AB
     global Arguments
 
     Arguments = parser.parse_args(shlex.split(argstring))
 
-    if Arguments.comments:
-        OUTPUT_COMMENTS = True
+    # GetValue has a default when it gets here, so if no arg, then we stay metric
     if Arguments.inches:
         GetValue = getImperialValue
-    if Arguments.no_header:
-        OUTPUT_HEADER = False
-    if Arguments.no_show_editor:
-        SHOW_EDITOR = False
+    # nb: as override when --inches
+    if Arguments.metric:
+        GetValue = getMetricValue
+
     if Arguments.precision is not None:
         PRECISION = int(Arguments.precision)
     FloatPrecision = f".{PRECISION}f" # always set
-    if Arguments.preamble is not None:
-        PREAMBLE = Arguments.preamble.replace('\\n','\n')
-    if Arguments.postamble is not None:
-        POSTAMBLE = Arguments.postamble.replace('\\n','\n')
-    if Arguments.ab_is_distance:
-        DEGREES_FOR_AB = False
 
 def export(objectslist, filename, argstring):
     global CurrentState
@@ -190,14 +177,11 @@ def export(objectslist, filename, argstring):
     gcode = ""
 
     # write header
-    if OUTPUT_HEADER:
+    if Arguments.header:
         # not using comment(), the option overrides --comments for the header
         gcode += linenumber() + "'Exported by FreeCAD\n"
         gcode += linenumber() + "'Post Processor: " + __name__ + "\n"
         gcode += linenumber() + "'Output Time:" + str(now) + "\n"
-
-    # Write the preamble
-    gcode += comment("(begin preamble)", True)
 
     def str_to_gcode(s):
         # one gcode
@@ -210,8 +194,9 @@ def export(objectslist, filename, argstring):
             raise ValueError(f"for gcode: {s}") from e
         return pc
 
-    if PREAMBLE:
-        preamble_lines = PREAMBLE.replace('\\n','\n').splitlines(False)
+    if Arguments.preamble:
+        gcode += comment('(begin preamble)',True)
+        preamble_lines = Arguments.preamble.replace('\\n','\n').splitlines(False)
         preamble_commands = [ str_to_gcode(x) for x  in preamble_lines ]
         gcode += parse_list_of_commands( preamble_commands )
 
@@ -229,15 +214,39 @@ def export(objectslist, filename, argstring):
         for line in POST_OPERATION.splitlines(True):
             gcode += linenumber() + line
 
-    # do the post_amble
-    gcode += comment("(begin postamble)", True)
+    if Arguments.return_to:
+        # x,y,z,a,b
+        # can omit any trailing ones which won't change
+        # can use empty to mean "don't change". e.g. --return-to ,0 # means only y to zero
+        possible_axis = ['X','Y','Z','A','B']
+        try:
+            coords = [
+                f"{possible_axis[i]}{float(x)}"
+                for i,x in enumerate(Arguments.return_to.split(','))
+                if x != ''
+            ]
+        except ValueError as e:
+            print(f"{e}\nExpected float-values in --return-to '{Arguments.return_to}'")
+        else:
+            gcode += comment(f"(return-to)", True)
+            return_to_gcode= f"G0 {' '.join(coords)}"
+            return_to = str_to_gcode( return_to_gcode )
+            gcode += parse_list_of_commands( [return_to] )
 
-    if POSTAMBLE:
-        postamble_lines = POSTAMBLE.replace('\\n','\n').splitlines(False)
+    if Arguments.postamble:
+        gcode += comment('(begin postamble)',True)
+        postamble_lines = Arguments.postamble.replace('\\n','\n').splitlines(False)
         postamble_commands = [ str_to_gcode(x) for x  in postamble_lines ]
         gcode += parse_list_of_commands( postamble_commands )
 
-    if SHOW_EDITOR:
+    if Arguments.native_postamble:
+        comment('(native postamble)',True)
+        post_lines = Arguments.native_postamble.replace('\\n','\n')
+        if not post_lines.endswith("\n"):
+            post_lines += "\n"
+        gcode += post_lines
+
+    if Arguments.show_editor:
         dia = PostUtils.GCodeEditorDialog()
         dia.editor.setText(gcode)
         result = dia.exec_()
@@ -263,7 +272,7 @@ def move(command):
 
     axis = ""
     # we don't do CUVW
-    for p in ("C", "U", "V", "W"): 
+    for p in ("C", "U", "V", "W"):
         if p in command.Parameters:
             print(f"ERROR: We can't do axis {p} (or any of CUVW)")
             return '' # this skips speed change!
@@ -315,7 +324,7 @@ def move(command):
     if len(axis) == 1:
         # axis string is key and command-second-letter
         txt += pref + axis
-        if axis in {'A','B'} and DEGREES_FOR_AB:
+        if axis in {'A','B'} and not Arguments.ab_is_distance:
             txt += "," + format(command.Parameters[axis], FloatPrecision)
         else:
             txt += "," + format(GetValue(command.Parameters[axis]), FloatPrecision)
@@ -336,7 +345,7 @@ def move(command):
         # we could optimize to an M4 if just A
         txt += pref + "5"
         for key in ('X','Y','Z','A','B'):
-            if key in {'A','B'} and DEGREES_FOR_AB:
+            if key in {'A','B'} and not Arguments.ab_is_distance:
                 txt += "," + format(command.Parameters[key], FloatPrecision) if key in axis else ''
             else:
                 txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
@@ -389,7 +398,7 @@ def comment(command, keepparens=False):
     if isinstance(command, Path.Command):
         command = command.Name
 
-    if OUTPUT_COMMENTS:
+    if Arguments.comments:
         return f"'{command if keepparens else command[1:-1]}\n"
     else:
         print("a comment", command)
@@ -461,7 +470,7 @@ def parse_list_of_commands(commands):
             if c.Parameters:
                 CurrentState.update(c.Parameters)
         else:
-            print("I don't know the (gcode) command: {command}")
+            print(f"I don't know the (gcode) command: {command}")
 
     return output
 
