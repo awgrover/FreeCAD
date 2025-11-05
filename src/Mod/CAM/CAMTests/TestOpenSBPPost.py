@@ -25,7 +25,7 @@
 import FreeCAD
 
 import Path
-import CAMTests.PathTestUtils as PathTestUtils
+from CAMTests import PathTestUtils
 from importlib import reload
 from Path.Post.scripts import opensbp_post as postprocessor
 
@@ -102,7 +102,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         if debug:
             print(f"--------{nl}{gcode}--------{nl}")
 
-        if expected==None:
+        if expected is None:
             self.assertEqual(gcode, "")
         else:
             lines = gcode.splitlines()
