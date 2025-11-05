@@ -86,6 +86,8 @@ parser.add_argument(
     # this should probably be True for most shopbot installations
     "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
 )
+parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
+Arguments = None # updated at export() time with parser.parse_args
 
 TOOLTIP_ARGS = parser.format_help()
 
@@ -136,25 +138,26 @@ def processArguments(argstring):
     global GetValue
     global FloatPrecision
     global DEGREES_FOR_AB
+    global Arguments
 
-    args = parser.parse_args(shlex.split(argstring))
+    Arguments = parser.parse_args(shlex.split(argstring))
 
-    if args.comments:
+    if Arguments.comments:
         OUTPUT_COMMENTS = True
-    if args.inches:
+    if Arguments.inches:
         GetValue = getImperialValue
-    if args.no_header:
+    if Arguments.no_header:
         OUTPUT_HEADER = False
-    if args.no_show_editor:
+    if Arguments.no_show_editor:
         SHOW_EDITOR = False
-    if args.precision is not None:
-        PRECISION = int(args.precision)
+    if Arguments.precision is not None:
+        PRECISION = int(Arguments.precision)
     FloatPrecision = f".{PRECISION}f" # always set
-    if args.preamble is not None:
-        PREAMBLE = args.preamble.replace('\\n','\n')
-    if args.postamble is not None:
-        POSTAMBLE = args.postamble.replace('\\n','\n')
-    if args.ab_is_distance:
+    if Arguments.preamble is not None:
+        PREAMBLE = Arguments.preamble.replace('\\n','\n')
+    if Arguments.postamble is not None:
+        POSTAMBLE = Arguments.postamble.replace('\\n','\n')
+    if Arguments.ab_is_distance:
         DEGREES_FOR_AB = False
 
 def export(objectslist, filename, argstring):
@@ -257,21 +260,29 @@ def export(objectslist, filename, argstring):
 def move(command):
     txt = ""
 
-    # if 'F' in command.Parameters:
-    #     txt += feedrate(command)
-
     axis = ""
-    for p in ("X", "Y", "Z", "A", "B", "C", "U", "V", "W"): # can't do CUVW
+    # we don't do CUVW
+    for p in ("C", "U", "V", "W"): 
         if p in command.Parameters:
-            if command.Parameters[p] != CurrentState[p]:
+            print(f"ERROR: We can't do axis {p} (or any of CUVW)")
+            return '' # this skips speed change!
+
+    for p in ("X", "Y", "Z", "A", "B"): # we don't do CUVW
+        if p in command.Parameters:
+            if Arguments.axis_modal:
+                if command.Parameters[p] != CurrentState[p]:
+                    axis += p
+            else:
                 axis += p
 
+    # Handle speed change
     if "F" in command.Parameters:
-        speed = command.Parameters["F"]
         if command.Name in {"G1", "G01"}:  # move
             movetype = "MS"
         else:  # jog
             movetype = "JS"
+
+        speed = command.Parameters["F"]
         zspeed = ""
         xyspeed = ""
         if "Z" in axis:
@@ -292,6 +303,8 @@ def move(command):
 
         if zspeed or xyspeed:
             txt += "{},{},{}\n".format(movetype, xyspeed, zspeed)
+
+    # Actual move
 
     if command.Name in {"G0", "G00"}:
         pref = "J"

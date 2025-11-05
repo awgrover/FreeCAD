@@ -109,6 +109,17 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             self.assertGreater( len(lines), first_command ) # need at least first_command+1 lines
             self.assertEqual(lines[first_command], expected)
 
+    def multi_compare(self, *args ):
+        """Actually as if: ( *gcode, options, expected )
+        """
+        self.docobj.Path = Path.Path([Path.Command(x) for x in args[:-2]])
+        post_args = args[-2]
+        expected = args[-1]
+
+        postables = [self.docobj]
+        gcode = postprocessor.export(postables, "-", post_args)
+        self.assertEqual(gcode, expected)
+
     def test000(self):
         """Test Output Generation.
         Empty path.  Produces only the preamble and postable.
@@ -218,47 +229,49 @@ MX,22.0000
         Test test modal
         Suppress the command name if the same as previous
         """
-        c = Path.Command("G0 X10 Y20 Z30")
-        c1 = Path.Command("G0 X10 Y30 Z30")
+        c = "G0 X10 Y20 Z30"
+        c1 = "G0 X10 Y20 Z30"
 
-        self.docobj.Path = Path.Path([c, c1])
-        postables = [self.docobj]
-
-        args = "--no-header --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        expected = "J3,10.0000,20.0000,30.0000"
-        self.assertEqual(gcode, expected)
+        self.multi_compare( c, c1,
+            "--no-header --no-show-editor",
+            """J3,10.0000,20.0000,30.0000
+J3,10.0000,20.0000,30.0000
+"""
+        )
+        self.multi_compare( c, c1,
+            "--no-header --modal --no-show-editor",
+            "J3,10.0000,20.0000,30.0000"
+        )
 
     def test070(self):
         """
         Suppress the axis coordinate if the same as previous
         """
+
+        # w/o axis-modal
+        c="G0 X10 Y20 Z30"
+        self.multi_compare( c, "G0 X10 Y30 Z30",
+            "--no-header --no-show-editor",
+            """J3,10.0000,20.0000,30.0000
+J3,10.0000,30.0000,30.0000
+"""
+        )
+
         # diff y
-        c = Path.Command("G0 X10 Y20 Z30")
-        c1 = Path.Command("G0 X10 Y30 Z30")
-
-        self.docobj.Path = Path.Path([c, c1])
-        postables = [self.docobj]
-
-        args = "--no-header --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        expected = """J3,10.0000,20.0000,30.0000
+        self.multi_compare( c, "G0 X10 Y30 Z30",
+            "--no-header --axis-modal --no-show-editor",
+            """J3,10.0000,20.0000,30.0000
 JY,30.0000
 """
-        self.assertEqual(gcode, expected)
+        )
 
         # diff z
-        c1 = Path.Command("G0 X10 Y20 Z40")
-
-        self.docobj.Path = Path.Path([c, c1])
-        postables = [self.docobj]
-
-        args = "--no-header --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        expected = """J3,10.0000,20.0000,30.0000
+        self.multi_compare( c, "G0 X10 Y20 Z40",
+            "--no-header --axis-modal --no-show-editor",
+            """J3,10.0000,20.0000,30.0000
 JZ,40.0000
 """
-        self.assertEqual(gcode, expected)
+        )
 
     def test080(self):
         """
