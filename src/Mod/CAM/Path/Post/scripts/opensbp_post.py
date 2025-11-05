@@ -23,13 +23,13 @@
 # *                                                                         *
 # ***************************************************************************
 
+from builtins import open as pyopen
 import argparse
 import datetime
 import shlex
 import Path
 import Path.Post.Utils as PostUtils
-import PathScripts.PathUtils as PathUtils
-from builtins import open as pyopen
+from PathScripts import PathUtils
 
 
 TOOLTIP = """
@@ -147,12 +147,12 @@ def processArguments(argstring):
         OUTPUT_HEADER = False
     if args.no_show_editor:
         SHOW_EDITOR = False
-    if args.precision != None:
+    if args.precision is not None:
         PRECISION = int(args.precision)
     FloatPrecision = f".{PRECISION}f" # always set
-    if args.preamble != None:
+    if args.preamble is not None:
         PREAMBLE = args.preamble.replace('\\n','\n')
-    if args.postamble != None:
+    if args.postamble is not None:
         POSTAMBLE = args.postamble.replace('\\n','\n')
     if args.ab_is_distance:
         DEGREES_FOR_AB = False
@@ -164,10 +164,9 @@ def export(objectslist, filename, argstring):
 
     for obj in objectslist:
         if not hasattr(obj, "Path"):
-            s = "the object " + obj.Name
-            s += " is not a path. Please select only path and Compounds."
-            print(s)
-            return
+            print( f"the object {obj.Name} is not a path. Please select only path and Compounds." )
+            # Other postprocessors skip it
+            return ''
 
     CurrentState = {
         "X": 0,
@@ -204,12 +203,12 @@ def export(objectslist, filename, argstring):
             pc.setFromGCode(s)
         except ValueError as e:
             # can't tell if it is really 'Badly formatted GCode argument', so just add our gcode to the message
-            raise ValueError(f"{e.args[0]}: {s}", *(e.args[1:]))
+            raise ValueError(f"for gcode: {s}") from e
         return pc
 
     if PREAMBLE:
         preamble_lines = PREAMBLE.replace('\\n','\n').splitlines(False)
-        preamble_commands = [ str_to_gcode(x) or pc for x  in preamble_lines ]
+        preamble_commands = [ str_to_gcode(x) for x  in preamble_lines ]
         gcode += parse_list_of_commands( preamble_commands )
 
     for obj in objectslist:
@@ -231,7 +230,7 @@ def export(objectslist, filename, argstring):
 
     if POSTAMBLE:
         postamble_lines = POSTAMBLE.replace('\\n','\n').splitlines(False)
-        postamble_commands = [ str_to_gcode(x) or pc for x  in postamble_lines ]
+        postamble_commands = [ str_to_gcode(x) for x  in postamble_lines ]
         gcode += parse_list_of_commands( postamble_commands )
 
     if SHOW_EDITOR:
@@ -248,10 +247,9 @@ def export(objectslist, filename, argstring):
     print("done postprocessing.")
 
     # Write the output
-    if not filename == "-":
-        gfile = pyopen(filename, "w")
-        gfile.write(final)
-        gfile.close()
+    if filename != "-":
+        with pyopen(filename, "w") as gfile:
+            gfile.write(final)
 
     return final
 
@@ -263,31 +261,31 @@ def move(command):
     #     txt += feedrate(command)
 
     axis = ""
-    for p in ["X", "Y", "Z", "A", "B", "C", "U", "V", "W"]: # can't do CUVW
+    for p in ("X", "Y", "Z", "A", "B", "C", "U", "V", "W"): # can't do CUVW
         if p in command.Parameters:
             if command.Parameters[p] != CurrentState[p]:
                 axis += p
 
     if "F" in command.Parameters:
         speed = command.Parameters["F"]
-        if command.Name in ["G1", "G01"]:  # move
+        if command.Name in {"G1", "G01"}:  # move
             movetype = "MS"
         else:  # jog
             movetype = "JS"
         zspeed = ""
         xyspeed = ""
         if "Z" in axis:
-            speedKey = "{}Z".format(movetype)
-            speedVal = GetValue(speed)
-            if CurrentState[speedKey] != speedVal:
-                CurrentState[speedKey] = speedVal
-                zspeed = "{:f}".format(speedVal)
+            speed_key = "{}Z".format(movetype)
+            speed_val = GetValue(speed)
+            if CurrentState[speed_key] != speed_val:
+                CurrentState[speed_key] = speed_val
+                zspeed = "{:f}".format(speed_val)
         if ("X" in axis) or ("Y" in axis):
-            speedKey = "{}XY".format(movetype)
-            speedVal = GetValue(speed)
-            if CurrentState[speedKey] != speedVal:
-                CurrentState[speedKey] = speedVal
-                xyspeed = "{:f}".format(speedVal)
+            speed_key = "{}XY".format(movetype)
+            speed_val = GetValue(speed)
+            if CurrentState[speed_key] != speed_val:
+                CurrentState[speed_key] = speed_val
+                xyspeed = "{:f}".format(speed_val)
 
         if "A" in axis or "B" in axis:
             print("WARNING: we aren't handling speed for A and B axis...")
@@ -295,7 +293,7 @@ def move(command):
         if zspeed or xyspeed:
             txt += "{},{},{}\n".format(movetype, xyspeed, zspeed)
 
-    if command.Name in ["G0", "G00"]:
+    if command.Name in {"G0", "G00"}:
         pref = "J"
     else:
         pref = "M"
@@ -303,7 +301,7 @@ def move(command):
     if len(axis) == 1:
         # axis string is key and command-second-letter
         txt += pref + axis
-        if axis in ['A','B'] and DEGREES_FOR_AB:
+        if axis in {'A','B'} and DEGREES_FOR_AB:
             txt += "," + format(command.Parameters[axis], FloatPrecision)
         else:
             txt += "," + format(GetValue(command.Parameters[axis]), FloatPrecision)
@@ -313,18 +311,18 @@ def move(command):
         txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
         txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
         txt += "\n"
-    elif axis in [ "XZ", "YZ", "XYZ" ]:
+    elif axis in { "XZ", "YZ", "XYZ" }:
         # anything plus Z requires the 3 arg version
         txt += pref + "3"
-        for key in ['X','Y','Z']:
+        for key in ('X','Y','Z'):
             txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
         txt += "\n"
     elif ('A' in axis or 'B' in axis) and len(axis)>1 and not next( ( c for c in 'CUVW' if c in axis), None):
         # AB+ needs "5" version (carefully excluding CUVW)
         # we could optimize to an M4 if just A
         txt += pref + "5"
-        for key in ['X','Y','Z','A','B']:
-            if key in ['A','B'] and DEGREES_FOR_AB:
+        for key in ('X','Y','Z','A','B'):
+            if key in {'A','B'} and DEGREES_FOR_AB:
                 txt += "," + format(command.Parameters[key], FloatPrecision) if key in axis else ''
             else:
                 txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
