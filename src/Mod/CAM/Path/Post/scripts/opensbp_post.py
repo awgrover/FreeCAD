@@ -87,6 +87,7 @@ parser.add_argument(
     "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
 )
 parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
+parser.add_argument("--modal", action=argparse.BooleanOptionalAction, help="Shorten output when a modal command repeats for no effect", default=False)
 Arguments = None # updated at export() time with parser.parse_args
 
 TOOLTIP_ARGS = parser.format_help()
@@ -382,6 +383,12 @@ def tool_change(command):
 def comment(command, keepparens=False):
     # comments from gcode are stripped of ()
     # comments we generate include ()
+
+    # from gcode stream, it's a Path.Command
+    # from internal use, it's a str
+    if isinstance(command, Path.Command):
+        command = command.Name
+
     if OUTPUT_COMMENTS:
         return f"'{command if keepparens else command[1:-1]}\n"
     else:
@@ -405,21 +412,20 @@ def spindle(command):
 
 # Supported Commands
 scommands = {
-    "G0": move,
-    "G1": move,
-    "G2": arc,
-    "G3": arc,
-    "M6": tool_change,
-    "M3": spindle,
-    "G00": move,
-    "G01": move,
-    "G02": arc,
-    "G03": arc,
-    "M06": tool_change,
-    "M03": spindle,
-    "message": comment,
+    "G0": { "fn" : move, "modal" : True },
+    "G1": { "fn" : move, "modal" : True },
+    "G2": { "fn" : arc, "modal" : True },
+    "G3": { "fn" : arc, "modal" : True },
+    "M6": { "fn" : tool_change, "modal" : True },
+    "M3": { "fn" : spindle, "modal" : True },
+    "G00": { "fn" : move, "modal" : True },
+    "G01": { "fn" : move, "modal" : True },
+    "G02": { "fn" : arc, "modal" : True },
+    "G03": { "fn" : arc, "modal" : True },
+    "M06": { "fn" : tool_change, "modal" : True },
+    "M03": { "fn" : spindle, "modal" : True },
+    "comment": { "fn" : comment, "modal" : True },
 }
-
 
 def parse(pathobj):
     output = ""
@@ -439,17 +445,24 @@ def parse(pathobj):
 
 def parse_list_of_commands(commands):
     output = ""
+    last_gcode = ''
     for c in commands:
+
         command = c.Name
+        if command.startswith("("):
+            command = 'comment'
+
         if command in scommands:
-            output += scommands[command](c)
+            if Arguments.modal and c.toGCode() == last_gcode and scommands[command]['modal']:
+                continue
+            last_gcode = c.toGCode()
+
+            output += scommands[command]['fn'](c)
             if c.Parameters:
                 CurrentState.update(c.Parameters)
-        elif command.startswith("("):
-            output += comment(command)
         else:
-            print("I don't know what the command: ", end="")
-            print(command + " means.  Maybe I should support it.")
+            print("I don't know the (gcode) command: {command}")
+
     return output
 
 

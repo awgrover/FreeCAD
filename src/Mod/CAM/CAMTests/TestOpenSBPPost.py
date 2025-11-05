@@ -109,8 +109,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             self.assertGreater( len(lines), first_command ) # need at least first_command+1 lines
             self.assertEqual(lines[first_command], expected)
 
-    def multi_compare(self, *args ):
-        """Actually as if: ( *gcode, options, expected )
+    def multi_compare(self, *args, debug=False ):
+        """Actually as if: ( *gcode, options, expected, debug=True )
         """
         self.docobj.Path = Path.Path([Path.Command(x) for x in args[:-2]])
         post_args = args[-2]
@@ -118,6 +118,9 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 
         postables = [self.docobj]
         gcode = postprocessor.export(postables, "-", post_args)
+        if debug:
+            nl="\n"
+            print(f"--------{nl}{gcode}--------{nl}")
         self.assertEqual(gcode, expected)
 
     def test000(self):
@@ -230,17 +233,16 @@ MX,22.0000
         Suppress the command name if the same as previous
         """
         c = "G0 X10 Y20 Z30"
-        c1 = "G0 X10 Y20 Z30"
 
-        self.multi_compare( c, c1,
+        self.multi_compare( c, c,
             "--no-header --no-show-editor",
             """J3,10.0000,20.0000,30.0000
 J3,10.0000,20.0000,30.0000
 """
         )
-        self.multi_compare( c, c1,
+        self.multi_compare( c, c,
             "--no-header --modal --no-show-editor",
-            "J3,10.0000,20.0000,30.0000"
+            "J3,10.0000,20.0000,30.0000\n",
         )
 
     def test070(self):
@@ -310,6 +312,7 @@ PAUSE
         postables = [self.docobj]
         args = "--no-header --comments  --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
+        print(f"### gcode {gcode}")
         self.assertEqual(gcode, expected)
 
     def test100(self):
