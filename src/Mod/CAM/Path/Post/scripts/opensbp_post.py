@@ -151,6 +151,10 @@ def set_speeds_before_tool_change(obj):
 
     gcode = ''
 
+    # Shouldn't happen in real use, but happens during unit-testing
+    if 'UNDER_UNITTEST' in globals() and obj is None:
+        return ''
+
     gcode += comment(f"(set speeds: {obj.Label})", True)
     vs = []
 

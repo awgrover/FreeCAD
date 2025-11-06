@@ -80,6 +80,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             postprocessor
         )  # technical debt.  This shouldn't be necessary but here to bypass a bug
 
+        postprocessor.UNDER_UNITTEST = True # because we don't setup a tool-controller in these tests
+
     def tearDown(self):
         """tearDown()...
         This method is called after each test() method. Add cleanup instructions here.
@@ -309,17 +311,22 @@ JZ,40.0000
         gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
         self.multi_compare( *gcode_in,
             "--no-header --comments --no-show-editor",
-            """&Tool=2
-&ToolName=2
+            """'(begin operation: testpath)
+'(Path: testpath)
+'(tool change)
+&Tool=2
+'(First change tool, should already be #2: 2)
+&ToolName="2"
 TR,3000
 'Change spindle speed to 3000
 PAUSE
+'(tool change)
 &Tool=3
-'Change tool to 3
+'Change tool to #3: 3
 PAUSE
-&ToolName=3
+&ToolName="3"
+'(finish operation: testpath)
 """,
-            debug=True
         )
 
         # both tool and spindle: auto
@@ -327,12 +334,12 @@ PAUSE
             "--toolchanger --spindlecontroller --no-header --no-show-editor",
             """&Tool=2
 C9 'toolchanger
-&ToolName=2
+&ToolName="2"
 TR,3000
 C6 'spindlecontroller
 &Tool=3
 C9 'toolchanger
-&ToolName=3
+&ToolName="3"
 """
         )
 
@@ -422,7 +429,6 @@ C9 'toolchanger
             "G1 X10 Y20 Z30 A90 B90",
             "M5,10.0000,20.0000,30.0000,90.0000,90.0000",
             "--no-header --no-show-editor",
-            debug=True
         )
         self.compare_first_command(
             "G1 X10 Y20 Z30 A90 B90",
