@@ -24,9 +24,11 @@
 # ***************************************************************************
 
 from builtins import open as pyopen
+import re
 import argparse
 import datetime
 import shlex
+import FreeCAD
 import Path
 import Path.Post.Utils as PostUtils
 from PathScripts import PathUtils
@@ -92,26 +94,22 @@ parser.add_argument(
     # this should probably be True for most shopbot installations
     "--inches", action="store_true", help="Convert output for US imperial mode, default=metric", default=False
 )
+parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
+parser.add_argument("--modal", action=argparse.BooleanOptionalAction, help="Shorten output when a modal command repeats for no effect", default=False)
 parser.add_argument(
     # this should probably be True for most shopbot installations
     "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
 )
-parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
-parser.add_argument("--modal", action=argparse.BooleanOptionalAction, help="Shorten output when a modal command repeats for no effect", default=False)
 parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
 parser.add_argument("--spindlecontroller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
+parser.add_argument("--gcodecomments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
 
 
 Arguments = None # updated at export() time with parser.parse_args
 
 TOOLTIP_ARGS = parser.format_help()
 
-# Pre operation text will be inserted before every operation
-PRE_OPERATION = """"""
-
-# Post operation text will be inserted after every operation
-POST_OPERATION = """"""
-
+ALLOWED_AXIS = ["X", "Y", "Z", "A", "B"]  # also used for --modal optimization
 CurrentState = {}
 
 
@@ -147,6 +145,53 @@ def processArguments(argstring):
         PRECISION = int(Arguments.precision)
     FloatPrecision = f".{PRECISION}f" # always set
 
+def set_speeds_before_tool_change(obj):
+    # on tool change, expicitly set speeds to compensate for missing F parameters on early movements
+    # Only call us for isinstance(obj.Proxy, ToolController)
+
+    gcode = ''
+
+    gcode += comment(f"(set speeds: {obj.Label})", True)
+    vs = []
+
+    has_speed = False # skip VS if no speeds
+
+    if obj.HorizFeed != 0.0:
+        has_speed = True
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizFeed.getValueAs('mm/s')).Value),'.4f') )
+    else:
+        vs.append('')
+        gcode += comment("(no HorizFeed)", True)
+    if obj.HorizFeed != 0.0:
+        has_speed = True
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertFeed.getValueAs('mm/s')).Value),'.4f') )
+    else:
+        vs.append('')
+        gcode += comment("(no VertFeed)", True)
+
+    # fixme: where to get values?
+    vs.append('') # a-move-speed
+    vs.append('') # b-move-speed
+
+    if obj.HorizRapid != 0.0:
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizRapid.getValueAs('mm/s')).Value),'.4f') )
+        has_speed = True
+    else:
+        vs.append('')
+        gcode += comment("(no HorizRapid)", True)
+
+    if obj.VertRapid != 0.0:
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),'.4f') )
+        has_speed = True
+    else:
+        vs.append('')
+        gcode += comment("(no VertRapid)", True)
+
+    if has_speed:
+        gcode += f'VS,{ ",".join(vs)}\n'
+
+    return gcode
+
 def export(objectslist, filename, argstring):
     global CurrentState
 
@@ -171,6 +216,9 @@ def export(objectslist, filename, argstring):
         "JSZ": 0,
         "MSXY": 0,
         "MSZ": 0,
+        "Tool" : None, # None on first time, then the number
+        "ToolController" : None, # a toolcontroller object from the document
+        "Absolute" : True, # G91 puts in relative
     }
     print("postprocessing...")
     gcode = ""
@@ -178,9 +226,9 @@ def export(objectslist, filename, argstring):
     # write header
     if Arguments.header:
         # not using comment(), the option overrides --comments for the header
-        gcode += linenumber() + "'Exported by FreeCAD\n"
-        gcode += linenumber() + "'Post Processor: " + __name__ + "\n"
-        gcode += linenumber() + "'Output Time:" + str(now) + "\n"
+        gcode += "'Exported by FreeCAD\n"
+        gcode += "'Post Processor: " + __name__ + "\n"
+        gcode += "'Output Time:" + str(now) + "\n"
 
     def str_to_gcode(s):
         # one gcode
@@ -200,18 +248,19 @@ def export(objectslist, filename, argstring):
         gcode += parse_list_of_commands( preamble_commands )
 
     for obj in objectslist:
+        # Order: Fixture, ToolControl, Path, repeat
+
+        # so we can get speeds and tool-name etc deeper in the objects
+        if hasattr(obj, "Proxy") and isinstance(obj.Proxy, Path.Tool.Controller.ToolController):
+            CurrentState['ToolController'] = obj # .Tool.Label is the tool name
 
         # do the pre_op
         gcode += comment(f"(begin operation: {obj.Label})", True)
-        for line in PRE_OPERATION.splitlines(True):
-            gcode += linenumber() + line
 
         gcode += parse(obj)
 
         # do the post_op
         gcode += comment(f"(finish operation: {obj.Label})", True)
-        for line in POST_OPERATION.splitlines(True):
-            gcode += linenumber() + line
 
     if Arguments.return_to:
         # x,y,z,a,b
@@ -266,6 +315,10 @@ def export(objectslist, filename, argstring):
     return final
 
 
+def gcodecomment(command,prefix=''):
+    # return the gcode as a trailing comment if appropriate
+    return f" '{prefix}{command.toGCode()}" if Arguments.gcodecomments else ''
+
 def move(command):
     txt = ""
 
@@ -276,10 +329,13 @@ def move(command):
             print(f"ERROR: We can't do axis {p} (or any of CUVW)")
             return '' # this skips speed change!
 
-    for p in ("X", "Y", "Z", "A", "B"): # we don't do CUVW
+    for p in ALLOWED_AXIS : # we don't do CUVW
         if p in command.Parameters:
             if Arguments.axis_modal:
-                if command.Parameters[p] != CurrentState[p]:
+                if (
+                    (CurrentState['Absolute'] and command.Parameters[p] != CurrentState[p])
+                    or (not CurrentState['Absolute'] and command.Parameters[p] != 0)
+                ):
                     axis += p
             else:
                 axis += p
@@ -311,7 +367,7 @@ def move(command):
             print("WARNING: we aren't handling speed for A and B axis...")
 
         if zspeed or xyspeed:
-            txt += "{},{},{}\n".format(movetype, xyspeed, zspeed)
+            txt += f"{movetype},{xyspeed},{zspeed}{gcodecomment(command)}\n"
 
     # Actual move
 
@@ -320,6 +376,8 @@ def move(command):
     else:
         pref = "M"
 
+    txt_len_before_move = len(txt) # for detection to do +gcodecomment and \n
+
     if len(axis) == 1:
         # axis string is key and command-second-letter
         txt += pref + axis
@@ -327,18 +385,15 @@ def move(command):
             txt += "," + format(command.Parameters[axis], FloatPrecision)
         else:
             txt += "," + format(GetValue(command.Parameters[axis]), FloatPrecision)
-        txt += "\n"
     elif axis == "XY":
         txt += pref + "2"
         txt += "," + format(GetValue(command.Parameters["X"]), FloatPrecision)
         txt += "," + format(GetValue(command.Parameters["Y"]), FloatPrecision)
-        txt += "\n"
     elif axis in { "XZ", "YZ", "XYZ" }:
         # anything plus Z requires the 3 arg version
         txt += pref + "3"
         for key in ('X','Y','Z'):
             txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
-        txt += "\n"
     elif ('A' in axis or 'B' in axis) and len(axis)>1 and not next( ( c for c in 'CUVW' if c in axis), None):
         # AB+ needs "5" version (carefully excluding CUVW)
         # we could optimize to an M4 if just A
@@ -348,13 +403,17 @@ def move(command):
                 txt += "," + format(command.Parameters[key], FloatPrecision) if key in axis else ''
             else:
                 txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
-        txt += "\n"
     elif axis == "":
         print("warning: skipping duplicate move.")
     else:
         print(CurrentState)
         print(command)
         print(f"I don't know how to handle '{axis}' for a move.")
+
+    # common line endings
+    if len(txt) != txt_len_before_move:
+        txt += gcodecomment(command)
+        txt += "\n"
 
     return txt
 
@@ -378,15 +437,31 @@ def arc(command):
 def tool_change(command):
     txt = ""
     txt += comment("(tool change)", True)
-    txt += f"&Tool={int(command.Parameters['T'])}\n"
+    tool_number = int(command.Parameters['T'])
+    tool_name = CurrentState['ToolController'].Tool.Label if CurrentState['ToolController'] else str(tool_number)
+
+    txt += f"&Tool={tool_number}{gcodecomment(command)}\n"
     if Arguments.toolchanger:
         txt += "C9 'toolchanger\n"
     else:
-        txt += f"'Change tool to {int(command.Parameters['T'])}\n" # prompt
-        txt += "PAUSE\n" # causes a modal to ask "ok?"
+
+        # assume the first tool is already installed (for manual)
+        if CurrentState['Tool'] is None:
+            txt += comment(f"(First change tool, should already be #{tool_number}: {tool_name})",True)
+        else:
+            txt += f"'Change tool to #{tool_number}: {tool_name}\n" # prompt
+            txt += "PAUSE\n" # causes a modal to ask "ok?"
+        CurrentState['Tool'] = tool_number
     # after C9
-    txt += "&ToolName=" + str(int(command.Parameters["T"]))
-    txt += "\n"
+    # Don't know actual rules for strings, but need to quote lest a & gets interpreted
+    tool_name = re.sub(r'[^A-Za-z0-9/_ .-]', '', tool_name)
+    txt += f'&ToolName="{tool_name}"\n'
+
+
+    # As of FreeCAD 1.0.2, early movements don't emit a F, so there is no "current" speed
+    # Since a tool-change is issued 1st (and when appropriate), we'll set the current speed here
+    txt += set_speeds_before_tool_change(CurrentState['ToolController'])
+
     return txt
 
 
@@ -405,6 +480,14 @@ def comment(command, keepparens=False):
         print("a comment", command)
         return ''
 
+def absolute_positions(command):
+    CurrentState['Absolute'] = True
+    return comment("Absolute Positions", True) + "SA 'ABSOLUTE\n"
+
+    
+def relative_positions(command):
+    CurrentState['Absolute'] = False
+    return comment("Relative Positions", True) + "SR 'RELATIVE\n"
 
 def spindle(command):
     txt = ""
@@ -421,6 +504,32 @@ def spindle(command):
 
     return txt
 
+def coordinate_system(command):
+    txt = ''
+
+    gpart = command.Name
+
+    # Parsing for all of them, but we only support G54
+    if gpart == "G54.1":
+        which = int(command.Parameters['P'])
+    elif m := re.match(r'G5([45678])', gpart):
+        which = int(m.group(1)) - 3 # starts at 1
+    elif gpart == "G59":
+        if 'P' in command.Parameters:
+            which = int(command.Parameters['P'])
+        else:
+            which = 6
+    elif m := re.match(r'G59\.([123])', gpart):
+        which = 6 + int(m.group(1))
+
+    if which != 1:
+        print(f"Warning: {command.toGCode()} not supported (only G54 / coord-system 1)")
+
+    else:
+        txt += comment(f"G54 has no effect{gcodecomment(command)}", True)
+    
+    return txt
+        
 
 # Supported Commands
 scommands = {
@@ -436,6 +545,10 @@ scommands = {
     "G03": { "fn" : arc, "modal" : True },
     "M06": { "fn" : tool_change, "modal" : True },
     "M03": { "fn" : spindle, "modal" : True },
+    "G91" : { "fn" : relative_positions, "modal" : True },
+    "G90" : { "fn" : absolute_positions, "modal" : True },
+    "G54" : { "fn" : coordinate_system, "modal" : True },
+
     "comment": { "fn" : comment, "modal" : True },
 }
 
@@ -448,11 +561,14 @@ def parse(pathobj):
         for p in pathobj.Group:
             output += parse(p)
     else:  # parsing simple path
+
         # groups might contain non-path things like stock.
         if not hasattr(pathobj, "Path"):
             return output
+
         output += comment(f"(Path: {pathobj.Label})", True)
         output += parse_list_of_commands( PathUtils.getPathWithPlacement(pathobj).Commands )
+
     return output
 
 def parse_list_of_commands(commands):
@@ -465,8 +581,15 @@ def parse_list_of_commands(commands):
             command = 'comment'
 
         if command in scommands:
+            # skip duplicate commands
             if Arguments.modal and c.toGCode() == last_gcode and scommands[command]['modal']:
-                continue
+                # Don't elide movements if relative motion, it isn't a noop!
+                if set(ALLOWED_AXIS) & set( c.Parameters.keys() ):
+                    if CurrentState['Absolute']:
+                        continue
+                # non-movements don't care about relative
+                else:
+                    continue
             last_gcode = c.toGCode()
 
             output += scommands[command]['fn'](c)
@@ -476,10 +599,5 @@ def parse_list_of_commands(commands):
             print(f"I don't know the (gcode) command: {command}")
 
     return output
-
-
-def linenumber():
-    return ""
-
 
 # print(__name__ + " gcode postprocessor loaded.")

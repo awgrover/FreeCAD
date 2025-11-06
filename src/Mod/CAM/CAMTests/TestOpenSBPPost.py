@@ -278,10 +278,17 @@ J3,10.0000,30.0000,30.0000
         )
 
         # diff y
-        self.multi_compare( c, "G0 X10 Y30 Z30",
+        self.multi_compare( 
+            c, 
+            # absolute xy same
+            "G0 X10 Y30 Z30", 
+            # relative, xy same
+            "G91", "G0 X0 Y31 Z0",
             "--no-header --axis-modal --no-show-editor",
             """J3,10.0000,20.0000,30.0000
 JY,30.0000
+SR 'RELATIVE
+JY,31.0000
 """
         )
 
@@ -299,21 +306,23 @@ JZ,40.0000
         """
 
         # both tool and spindle: manual
-        gcode_in = [ "M6 T2", "M3 S3000" ]
+        gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
         self.multi_compare( *gcode_in,
-            "--no-header --no-show-editor",
+            "--no-header --comments --no-show-editor",
             """&Tool=2
-'Change tool to 2
-PAUSE
 &ToolName=2
 TR,3000
 'Change spindle speed to 3000
 PAUSE
-"""
+&Tool=3
+'Change tool to 3
+PAUSE
+&ToolName=3
+""",
+            debug=True
         )
 
         # both tool and spindle: auto
-        gcode_in = [ "M6 T2", "M3 S3000" ]
         self.multi_compare( *gcode_in,
             "--toolchanger --spindlecontroller --no-header --no-show-editor",
             """&Tool=2
@@ -321,6 +330,9 @@ C9 'toolchanger
 &ToolName=2
 TR,3000
 C6 'spindlecontroller
+&Tool=3
+C9 'toolchanger
+&ToolName=3
 """
         )
 
@@ -550,5 +562,34 @@ J3,1.0000,2.0000,3.0000
             "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim' --no-header --no-show-editor",
             """J3,1.0000,2.0000,3.0000
 verbatim
+"""
+        )
+
+    def test240(self):
+        """Test relative & --modal"""
+
+        c = "G0 X10 Y20 Z30"
+
+        self.multi_compare( "G91", c, c, "G90", c, c,
+            "--no-header --modal --no-show-editor",
+            """SR 'RELATIVE
+J3,10.0000,20.0000,30.0000
+J3,10.0000,20.0000,30.0000
+SA 'ABSOLUTE
+J3,10.0000,20.0000,30.0000
+"""
+        )
+
+    def test250(self):
+        """Test G54"""
+
+        c = "G0 X10 Y20 Z30"
+
+        self.multi_compare( "G54", "G54.1 P1", "G59 P1",
+            "--no-header --comments --no-show-editor",
+            """'(begin operation: testpath)
+'(Path: testpath)
+'G54 has no effect
+'(finish operation: testpath)
 """
         )
