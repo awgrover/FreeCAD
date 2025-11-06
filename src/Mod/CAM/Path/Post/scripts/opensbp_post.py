@@ -98,6 +98,9 @@ parser.add_argument(
 )
 parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
 parser.add_argument("--modal", action=argparse.BooleanOptionalAction, help="Shorten output when a modal command repeats for no effect", default=False)
+parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
+parser.add_argument("--spindlecontroller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
+
 
 Arguments = None # updated at export() time with parser.parse_args
 
@@ -108,10 +111,6 @@ PRE_OPERATION = """"""
 
 # Post operation text will be inserted after every operation
 POST_OPERATION = """"""
-
-# Tool Change commands will be inserted before a tool change
-TOOL_CHANGE = """"""
-
 
 CurrentState = {}
 
@@ -155,7 +154,7 @@ def export(objectslist, filename, argstring):
 
     for obj in objectslist:
         if not hasattr(obj, "Path"):
-            print( f"the object {obj.Name} is not a path. Please select only path and Compounds." )
+            print( f"the object {obj.Name if 'Name' in dir(obj) else obj.__class__.__name__} is not a path. Please select only path and Compounds." )
             # Other postprocessors skip it
             return ''
 
@@ -379,13 +378,15 @@ def arc(command):
 def tool_change(command):
     txt = ""
     txt += comment("(tool change)", True)
-    for line in TOOL_CHANGE.splitlines(True):
-        txt += line
+    txt += f"&Tool={int(command.Parameters['T'])}\n"
+    if Arguments.toolchanger:
+        txt += "C9 'toolchanger\n"
+    else:
+        txt += f"'Change tool to {int(command.Parameters['T'])}\n" # prompt
+        txt += "PAUSE\n" # causes a modal to ask "ok?"
+    # after C9
     txt += "&ToolName=" + str(int(command.Parameters["T"]))
     txt += "\n"
-    txt += f"&Tool={int(command.Parameters['T'])}\n"
-    txt += f"'Change tool to {int(command.Parameters['T'])}\n" # prompt
-    txt += "PAUSE\n" # causes a modal to ask "ok?"
     return txt
 
 
@@ -412,9 +413,11 @@ def spindle(command):
     else:
         pass
     txt += f"TR,{int(command.Parameters['S'])}\n"
-    #txt += "C6\n" a custom cut 6, from the menu
-    txt += f"'Change spindle speed to {int(command.Parameters['S'])}\n" # prompt
-    txt += "PAUSE\n" # causes a modal to ask "ok?"
+    if Arguments.spindlecontroller:
+        txt += "C6 'spindlecontroller\n"
+    else:
+        txt += f"'Change spindle speed to {int(command.Parameters['S'])}\n" # prompt
+        txt += "PAUSE\n" # causes a modal to ask "ok?"
 
     return txt
 

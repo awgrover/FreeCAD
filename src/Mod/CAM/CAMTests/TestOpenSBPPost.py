@@ -64,7 +64,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         to call static methods within this same class.
         """
         # Close geometry document without saving
-        FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)
+        for name in FreeCAD.listDocuments().keys():
+            FreeCAD.closeDocument(name)
 
     # Setup and tear down methods called before and after each unit test
     def setUp(self):
@@ -84,7 +85,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         This method is called after each test() method. Add cleanup instructions here.
         Such cleanup instructions will likely undo those in the setUp() method.
         """
-        FreeCAD.ActiveDocument.removeObject("testpath")
+        if FreeCAD.ActiveDocument and FreeCAD.ActiveDocument.findObjects(Name="testpath"):
+            FreeCAD.ActiveDocument.removeObject("testpath")
 
     def compare_first_command(self, path_string, expected, args, debug=False):
         """Perform a test with a single comparison to the first (command) line of the output."""
@@ -295,22 +297,32 @@ JZ,40.0000
         """
         Test tool change
         """
-        c = Path.Command("M6 T2")
-        c2 = Path.Command("M3 S3000")
-        self.docobj.Path = Path.Path([c, c2])
-        postables = [self.docobj]
 
-        args = "--no-header --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        expect="""&ToolName=2
-&Tool=2
+        # both tool and spindle: manual
+        gcode_in = [ "M6 T2", "M3 S3000" ]
+        self.multi_compare( *gcode_in,
+            "--no-header --no-show-editor",
+            """&Tool=2
 'Change tool to 2
 PAUSE
+&ToolName=2
 TR,3000
 'Change spindle speed to 3000
 PAUSE
 """
-        self.assertEqual(gcode, expect)
+        )
+
+        # both tool and spindle: auto
+        gcode_in = [ "M6 T2", "M3 S3000" ]
+        self.multi_compare( *gcode_in,
+            "--toolchanger --spindlecontroller --no-header --no-show-editor",
+            """&Tool=2
+C9 'toolchanger
+&ToolName=2
+TR,3000
+C6 'spindlecontroller
+"""
+        )
 
     def test090(self):
         """
