@@ -184,22 +184,34 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             "--no-header --precision=2 --no-show-editor",
         )
 
-        self.compare_first_command(
+        self.multi_compare(
             "G0 X10 Y20 Z30",
-            "J3,0.3937,0.7874,1.1811",
             "--no-header --inches --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,0
+J3,0.3937,0.7874,1.1811
+VD,,&WASUNITS
+""",
         )
-        self.compare_first_command(
+        self.multi_compare(
             "G0 X10 Y20 Z30",
-            "J3,0.39,0.79,1.18",
             "--no-header --inches --precision=2 --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,0
+J3,0.39,0.79,1.18
+VD,,&WASUNITS
+"""
         )
 
         # override as --metric
-        self.compare_first_command(
+        self.multi_compare(
             "G0 X10 Y20 Z30",
-            "J3,10.000,20.000,30.000",
             "--no-header --metric --precision=3 --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,1
+J3,10.000,20.000,30.000
+VD,,&WASUNITS
+"""
         )
 
     def test030(self):
@@ -237,15 +249,23 @@ MX,22.000
         """
 
         # inches
-        self.compare_first_command(
+        self.multi_compare(
             "G0 X10 Y20 Z30", # simple move
-            "J3,0.3937,0.7874,1.1811",
-            "--no-header --no-show-editor --inches"
+            "--no-header --no-show-editor --inches",
+            """&WASUNITS=%(25)
+VD,,0
+J3,0.3937,0.7874,1.1811
+VD,,&WASUNITS
+"""
         )
-        self.compare_first_command(
+        self.multi_compare(
             "G0 X10 Y20 Z30", # simple move
-            "J3,0.39,0.79,1.18",
-            "--no-header --no-show-editor --inches --precision 2"
+            "--no-header --no-show-editor --inches --precision 2",
+            """&WASUNITS=%(25)
+VD,,0
+J3,0.39,0.79,1.18
+VD,,&WASUNITS
+"""
         )
 
     def test060(self):
@@ -392,10 +412,14 @@ C9 'toolchanger
             "M5,10.000,20.000,30.000,40.000,50.000",
             "--no-header --no-show-editor",
         )
-        self.compare_first_command(
+        self.multi_compare(
             "G1 X10 Y20 Z30 A40 B50",
-            "M5,0.3937,0.7874,1.1811,40.0000,50.0000",
             "--no-header --inches --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,0
+M5,0.3937,0.7874,1.1811,40.0000,50.0000
+VD,,&WASUNITS
+"""
         )
 
     def test105(self):
@@ -403,16 +427,24 @@ C9 'toolchanger
 
         # only noticeable for --inches
 
-        self.compare_first_command(
+        self.multi_compare(
             "G1 X10 Y20 Z30 A40 B50",
-            "M5,0.3937,0.7874,1.1811,40.0000,50.0000",
             "--no-header --inches --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,0
+M5,0.3937,0.7874,1.1811,40.0000,50.0000
+VD,,&WASUNITS
+"""
         )
 
-        self.compare_first_command(
+        self.multi_compare(
             "G1 X10 Y20 Z30 A40 B50",
-            "M5,0.3937,0.7874,1.1811,1.5748,1.9685",
             "--no-header --no-show-editor --inches --ab-is-distance",
+            """&WASUNITS=%(25)
+VD,,0
+M5,0.3937,0.7874,1.1811,1.5748,1.9685
+VD,,&WASUNITS
+"""
         )
 
     def test110(self):
@@ -422,10 +454,14 @@ C9 'toolchanger
             "M5,10.000,20.000,30.000,89.000,89.000",
             "--no-header --no-show-editor",
         )
-        self.compare_first_command(
+        self.multi_compare(
             "G1 X10 Y20 Z30 A89 B89",
-            "M5,0.3937,0.7874,1.1811,89.0000,89.0000",
             "--no-header --inches --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,0
+M5,0.3937,0.7874,1.1811,89.0000,89.0000
+VD,,&WASUNITS
+"""
         )
 
     # FIXME: the use of getPathWithPlacement() causes a yaw-pitch calculation which gives odd AB values
@@ -515,10 +551,14 @@ C9 'toolchanger
             "M5,10.000,20.000,30.000,-40.000,-50.000",
             "--no-header --no-show-editor",
         )
-        self.compare_first_command(
+        self.multi_compare(
             "G1 X10 Y20 Z30 A-40 B-50",
-            "M5,0.3937,0.7874,1.1811,-40.0000,-50.0000",
             "--no-header --inches --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,0
+M5,0.3937,0.7874,1.1811,-40.0000,-50.0000
+VD,,&WASUNITS
+"""
         )
 
     @unittest.expectedFailure
@@ -624,7 +664,7 @@ J3,10.000,20.000,30.000
         )
     
     def test260(self):
-        """Test Helical Arc"""
+        """Test Arc"""
  
         c = "G2 X10 Y20 Z40 I1 J2 F99"
 

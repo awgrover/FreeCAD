@@ -132,6 +132,8 @@ Optimizing = {
     # which things will we optimize
     'speed' : False, # if True, don't emit speeds if unchanged
 }
+Units = None
+ExplicitUnits = None
 
 
 def processArguments(argstring):
@@ -140,19 +142,27 @@ def processArguments(argstring):
     global SKIP_UNKNOWN
     global GetValue
     global FloatPrecision
+    global Units
+    global ExplicitUnits
     global Arguments
     global Filters
 
     Arguments = parser.parse_args(shlex.split(argstring))
 
-    # GetValue has a default when it gets here, so if no arg, then we stay metric
+    GetValue = getMetricValue
+    Units="metric"
+    ExplicitUnits = False
     if Arguments.inches:
         GetValue = getImperialValue
         PRECISION = 4
+        Units="inches"
+        ExplicitUnits = True
     # nb: as override when --inches
     if Arguments.metric:
         GetValue = getMetricValue
         PRECISION = 3
+        Units="metric"
+        ExplicitUnits = True
 
     if Arguments.precision is not None:
         PRECISION = int(Arguments.precision)
@@ -290,6 +300,13 @@ def export(objectslist, filename, argstring):
             raise ValueError(message) from e
         return pc
 
+    # switch machine to our units
+    if ExplicitUnits:
+        gcode += comment("(explicit units)", True)
+        gcode += "&WASUNITS=%(25)\n"
+        vd =  { 'inches' : "VD,,0", 'metric' : "VD,,1" }
+        gcode += vd[Units] + "\n"
+
     if Arguments.native_preamble:
         comment('(native preamble)',True)
         pre_lines = Arguments.native_preamble.replace('\\n','\n')
@@ -346,6 +363,10 @@ def export(objectslist, filename, argstring):
         postamble_lines = Arguments.postamble.replace('\\n','\n').splitlines(False)
         postamble_commands = [ str_to_gcode(x, "--postamble") for x  in postamble_lines ]
         gcode += translate_commands( postamble_commands )
+
+    # restore units
+    if ExplicitUnits:
+        gcode += f"VD,,&WASUNITS\n"
 
     if Arguments.native_postamble:
         comment('(native postamble)',True)
@@ -427,6 +448,8 @@ def axis_list(command):
     for p in ALLOWED_AXIS : # we don't do CUVW
         if p in command.Parameters:
             if Arguments.axis_modal:
+                # FIXME: does --axis-modal mean "only vs immediately preceding command?"
+                # we are doing "vs current state"
                 if (
                     (CurrentState['Absolute'] and command.Parameters[p] != CurrentState[p])
                     or (not CurrentState['Absolute'] and command.Parameters[p] != 0)
