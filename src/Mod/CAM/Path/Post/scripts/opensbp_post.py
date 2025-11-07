@@ -125,10 +125,13 @@ def getMetricValue(val):
 def getImperialValue(val):
     return val / 25.4
 
-
 GetValue = getMetricValue
 FloatPrecision = None # setup in processArguments
 Filters = [] # setup in processArguments
+Optimizing = {
+    # which things will we optimize
+    'speed' : False, # if True, don't emit speeds if unchanged
+}
 
 
 def processArguments(argstring):
@@ -391,13 +394,13 @@ def adjust_speed(command, axis):
         if "Z" in axis:
             speed_key = "{}Z".format(movetype)
             speed_val = GetValue(speed)
-            if CurrentState[speed_key] != speed_val:
+            if not Optimizing['speed'] or CurrentState[speed_key] != speed_val:
                 CurrentState[speed_key] = speed_val
                 zspeed = format(speed_val, f".{PRECISION}f")
         if ("X" in axis) or ("Y" in axis):
             speed_key = f"{movetype}XY"
             speed_val = GetValue(speed)
-            if CurrentState[speed_key] != speed_val:
+            if not Optimizing['speed'] or CurrentState[speed_key] != speed_val:
                 CurrentState[speed_key] = speed_val
                 xyspeed = format(speed_val, f".{PRECISION}f")
 
