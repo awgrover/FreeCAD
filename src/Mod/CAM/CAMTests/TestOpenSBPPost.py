@@ -386,15 +386,10 @@ C9 'toolchanger
         )
 
     def test100(self):
-        """Test A, B, & C axis output for values between 0 and 90 degrees"""
+        """Test A, B axis output for values between 0 and 90 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A40 B50",
             "M5,10.000,20.000,30.000,40.000,50.000",
-            "--no-header --no-show-editor",
-        )
-        self.compare_first_command(
-            "G1 X10 Y20 Z30 A40 B50 C10",
-            None, # we don't do C
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -466,7 +461,7 @@ C9 'toolchanger
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A91 B91 C91",
+            "G1 X10 Y20 Z30 A91 B91",
             "M5,0.3937,0.7874,1.1811,91.0000,91.0000",
             "--no-header --inches --no-show-editor",
         )
@@ -494,7 +489,7 @@ C9 'toolchanger
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A240 B250 C260",
+            "G1 X10 Y20 Z30 A240 B250",
             "M5,0.3937,0.7874,1.1811,240.0000,250.0000",
             "--no-header --inches --no-show-editor",
         )
@@ -508,7 +503,7 @@ C9 'toolchanger
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
-            "G1 X10 Y20 Z30 A440 B450 C460",
+            "G1 X10 Y20 Z30 A440 B450",
             "M5,0.3937,0.7874,1.1811,440.0000,450.0000",
             "--no-header --inches --no-show-editor",
         )

@@ -125,7 +125,7 @@ def getImperialValue(val):
 
 GetValue = getMetricValue
 FloatPrecision = None # setup in processArguments
-Filters = [] # setup in processArguments 
+Filters = [] # setup in processArguments
 
 
 def processArguments(argstring):
@@ -168,7 +168,6 @@ def processArguments(argstring):
                 importlib.reload(m)
             # module is post.x_filter, just want the x_filter part for the class name
             klass = (module_name.split('.')[1]).title().replace('_','')
-            print(f"new {klass}")
 
             # We do not new() here, so Filters is a list of classes!
             fobj = getattr(m,klass) # (objectslist, filename, argstring)
@@ -229,15 +228,16 @@ def export(objectslist, filename, argstring):
     global CurrentState
     global Filters
 
-    print("postprocessing...")
+    FreeCAD.Console.PrintMessage("postprocessing...\n")
 
     for obj in objectslist:
         if not hasattr(obj, "Path"):
-            print( f"the object {obj.Name if 'Name' in dir(obj) else obj.__class__.__name__} is not a path. Please select only path and Compounds." )
+            FreeCAD.Console.PrintError( f"the object {obj.Name if 'Name' in dir(obj) else obj.__class__.__name__} is not a path. Please select only path and Compounds.\n" )
             # Other postprocessors skip it
             return ''
 
     CurrentState = {
+        "gcode_line_number" : 0,
         "X": 0,
         "Y": 0,
         "Z": 0,
@@ -253,7 +253,7 @@ def export(objectslist, filename, argstring):
         "Tool" : None, # None on first time, then the number
         "ToolController" : None, # a toolcontroller object from the document
         "Absolute" : True, # G91 puts in relative
-        "Operation" : None, # updated in parse_list_of_commands() when we start each operation
+        "Operation" : None, # updated in translate_commands() when we start each operation
     }
     Filters = []
     gcode = ""
@@ -273,7 +273,7 @@ def export(objectslist, filename, argstring):
         for f in Filters:
             gcode += comment(f"Filter: {f.__class__.__name__}", True, force=True)
 
-    def str_to_gcode(s):
+    def str_to_gcode(s, during):
         # one gcode
         # e.g. str_to_gcode("G0 X50")
         pc = Path.Command()
@@ -281,14 +281,16 @@ def export(objectslist, filename, argstring):
             pc.setFromGCode(s)
         except ValueError as e:
             # can't tell if it is really 'Badly formatted GCode argument', so just add our gcode to the message
-            raise ValueError(f"for gcode: {s}") from e
+            message = f"During {during}, gcode: {s}"
+            FreeCAD.Console.PrintError(message)
+            raise ValueError(message) from e
         return pc
 
     if Arguments.preamble:
         gcode += comment('(begin preamble)',True)
         preamble_lines = Arguments.preamble.replace('\\n','\n').splitlines(False)
-        preamble_commands = [ str_to_gcode(x) for x  in preamble_lines ]
-        gcode += parse_list_of_commands( preamble_commands )
+        preamble_commands = [ str_to_gcode(x, "--preamble") for x  in preamble_lines ]
+        gcode += translate_commands( preamble_commands )
 
     for obj in objectslist:
         # Order: Fixture, ToolControl, Path, repeat
@@ -319,18 +321,20 @@ def export(objectslist, filename, argstring):
                 if x != ''
             ]
         except ValueError as e:
-            print(f"{e}\nExpected float-values in --return-to '{Arguments.return_to}'")
+            message = f"Expected float-values in --return-to '{Arguments.return_to}'"
+            FreeCAD.Console.PrintError(message)
+            raise ValueError(message) from e
         else:
-            gcode += comment(f"(return-to)", True)
+            gcode += comment("(return-to)", True)
             return_to_gcode= f"G0 {' '.join(coords)}"
-            return_to = str_to_gcode( return_to_gcode )
-            gcode += parse_list_of_commands( [return_to] )
+            return_to = str_to_gcode( return_to_gcode, "--return-to" )
+            gcode += translate_commands( [return_to] )
 
     if Arguments.postamble:
         gcode += comment('(begin postamble)',True)
         postamble_lines = Arguments.postamble.replace('\\n','\n').splitlines(False)
-        postamble_commands = [ str_to_gcode(x) for x  in postamble_lines ]
-        gcode += parse_list_of_commands( postamble_commands )
+        postamble_commands = [ str_to_gcode(x, "--postamble") for x  in postamble_lines ]
+        gcode += translate_commands( postamble_commands )
 
     if Arguments.native_postamble:
         comment('(native postamble)',True)
@@ -350,7 +354,7 @@ def export(objectslist, filename, argstring):
     else:
         final = gcode
 
-    print("done postprocessing.")
+    FreeCAD.Console.PrintMessage("done postprocessing. {CurrentState['gcode_line_number']} gcodes.\n")
 
     # Write the output
     if filename != "-":
@@ -371,8 +375,10 @@ def move(command):
     # we don't do CUVW
     for p in ("C", "U", "V", "W"):
         if p in command.Parameters:
-            print(f"ERROR: We can't do axis {p} (or any of CUVW)")
-            return '' # this skips speed change!
+            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+            message = f"We can't do axis {p} (or any of CUVW) in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
+            FreeCAD.Console.PrintError(message)
+            raise NotImplementedError(message)
 
     for p in ALLOWED_AXIS : # we don't do CUVW
         if p in command.Parameters:
@@ -409,7 +415,8 @@ def move(command):
                 xyspeed = "{:f}".format(speed_val)
 
         if "A" in axis or "B" in axis:
-            print("WARNING: we aren't handling speed for A and B axis...")
+            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+            FreeCAD.Console.PrintWarning("WARNING: we aren't handling speed for A and B axis in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}\n")
 
         if zspeed or xyspeed:
             txt += f"{movetype},{xyspeed},{zspeed}{gcodecomment(command)}\n"
@@ -449,11 +456,15 @@ def move(command):
             else:
                 txt += "," + format(GetValue(command.Parameters[key]), FloatPrecision) if key in axis else ''
     elif axis == "":
-        print("warning: skipping duplicate move.")
+        #print("warning: skipping duplicate move.")
+        pass
     else:
-        print(CurrentState)
-        print(command)
-        print(f"I don't know how to handle '{axis}' for a move.")
+        opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+        message = f"I don't know how to handle '{axis}' for a move in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
+        FreeCAD.Console.PrintWarning(CurrentState+"\n")
+        FreeCAD.Console.PrintWarning(command.toGCode() + "\n")
+        FreeCAD.Console.PrintError(message)
+        raise NotImplementedError(message)
 
     # common line endings
     if len(txt) != txt_len_before_move:
@@ -522,14 +533,14 @@ def comment(command, keepparens=False, force=False):
     if Arguments.comments or force:
         return f"'{command if keepparens else command[1:-1]}\n"
     else:
-        print("a comment", command)
+        #print("a comment", command)
         return ''
 
 def absolute_positions(command):
     CurrentState['Absolute'] = True
     return comment("Absolute Positions", True) + "SA 'ABSOLUTE\n"
 
-    
+
 def relative_positions(command):
     CurrentState['Absolute'] = False
     return comment("Relative Positions", True) + "SR 'RELATIVE\n"
@@ -556,6 +567,8 @@ def coordinate_system(command):
 
     gpart = command.Name
 
+    which = 0 # safety
+
     # Parsing for all of them, but we only support G54
     if gpart == "G54.1":
         which = int(command.Parameters['P'])
@@ -570,13 +583,16 @@ def coordinate_system(command):
         which = 6 + int(m.group(1))
 
     if which != 1:
-        print(f"Warning: {command.toGCode()} not supported (only G54 / coord-system 1)")
+        opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+        message = f"coordinate-system not supported (only G54/1) in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
+        FreeCAD.Console.PrintError(message)
+        raise NotImplementedError(message)
 
     else:
         txt += comment(f"G54 has no effect{gcodecomment(command)}", True)
-    
+
     return txt
-        
+
 
 # Supported Commands
 scommands = {
@@ -599,7 +615,7 @@ scommands = {
     "comment": { "fn" : comment },
 }
 
-def filter(pathobj, path_commands):
+def filter_gcode(pathobj, path_commands):
     # an iterable of Path.Commands
     # we return the filtered commands
     filtered = path_commands # in case there are no filters
@@ -627,14 +643,17 @@ def parse(pathobj):
         # so, tests disabled for those
         # no-other post-procesor tests AB (except linuxcnc which does not do getPathWithPlacement())
 
-        output += parse_list_of_commands( filter(pathobj, PathUtils.getPathWithPlacement(pathobj).Commands) )
+        # we filter each pathobj
+        # and then translate
+        output += translate_commands( filter_gcode(pathobj, PathUtils.getPathWithPlacement(pathobj).Commands) )
 
     return output
 
-def parse_list_of_commands(commands):
+def translate_commands(commands):
     output = ""
     last_gcode = ''
     for c in commands:
+        CurrentState['gcode_line_number'] += 1 # i.e. from Freecad gcode
 
         command = c.Name
         if command.startswith("("):
@@ -660,13 +679,13 @@ def parse_list_of_commands(commands):
             pass
         else:
             opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+            message = f"gcode not handled in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
             if Arguments.abort_on_unknown and command not in SKIP_UNKNOWN:
-                message = f"gcode not handled in operation {opname}: {c.toGCode()}"
                 FreeCAD.Console.PrintError(message+"\n")
                 raise NotImplementedError(message)
             else:
-                output += comment(f"not handled: {c.toGCode()}", True, force=True)
-                FreeCAD.Console.PrintWarning(f"Skipped unknown gcode {'in '+opname if opname else ''}: {c.toGCode()}\n")
+                output += comment(message, True, force=True)
+                FreeCAD.Console.PrintWarning("Skipped: " + message + "\n")
 
     return output
 
