@@ -25,6 +25,8 @@
 
 from builtins import open as pyopen
 import re
+import sys
+import importlib
 import argparse
 import datetime
 import shlex
@@ -96,6 +98,7 @@ parser.add_argument(
     # this should probably be True for most shopbot installations
     "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
 )
+parser.add_argument("--filter","--filters", help="a ',' list of filters in FreeCAD.getUserMacroDir()/post to run on the gcode of each Path object, before we see it (i.e. cleanups). A class of same (camelcase) name as file, __init__(self,objectslist, filename, argstring), .filter(eachpathobj, its-.Commands) -> gcode")
 parser.add_argument("--abort-on-unknown", action=argparse.BooleanOptionalAction, help="Generate an error and fail if an unknown gcode is seen. default=True", default=True)
 parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, change them to a comment. E.g. --skip-unknown G55,G56")
 parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
@@ -122,6 +125,7 @@ def getImperialValue(val):
 
 GetValue = getMetricValue
 FloatPrecision = None # setup in processArguments
+Filters = [] # setup in processArguments 
 
 
 def processArguments(argstring):
@@ -131,6 +135,7 @@ def processArguments(argstring):
     global GetValue
     global FloatPrecision
     global Arguments
+    global Filters
 
     Arguments = parser.parse_args(shlex.split(argstring))
 
@@ -150,7 +155,24 @@ def processArguments(argstring):
 
     if Arguments.skip_unknown is not None:
         SKIP_UNKNOWN = Arguments.skip_unknown.split(',')
-        
+
+    if Arguments.filter is not None:
+        # allow _filter.py suffix
+        filter_names = ( re.sub(r'_filter$', '', re.sub(r'\.py$','',x)) for x in Arguments.filter.split(','))
+        for f in filter_names:
+            module_name = f"post.{f}_filter"
+            was = module_name in sys.modules
+            m = importlib.import_module(module_name)
+            if was:
+                # especially during development of the filter
+                importlib.reload(m)
+            # module is post.x_filter, just want the x_filter part for the class name
+            klass = (module_name.split('.')[1]).title().replace('_','')
+            print(f"new {klass}")
+
+            # We do not new() here, so Filters is a list of classes!
+            fobj = getattr(m,klass) # (objectslist, filename, argstring)
+            Filters.append(fobj)
 
 def set_speeds_before_tool_change(obj):
     # on tool change, expicitly set speeds to compensate for missing F parameters on early movements
@@ -205,8 +227,9 @@ def set_speeds_before_tool_change(obj):
 
 def export(objectslist, filename, argstring):
     global CurrentState
+    global Filters
 
-    processArguments(argstring)
+    print("postprocessing...")
 
     for obj in objectslist:
         if not hasattr(obj, "Path"):
@@ -232,8 +255,14 @@ def export(objectslist, filename, argstring):
         "Absolute" : True, # G91 puts in relative
         "Operation" : None, # updated in parse_list_of_commands() when we start each operation
     }
-    print("postprocessing...")
+    Filters = []
     gcode = ""
+
+    processArguments(argstring)
+
+
+    # need to instantiate filters now that we have the full args
+    Filters = [ x(objectslist, filename, argstring) for x in Filters]
 
     # write header
     if Arguments.header:
@@ -241,6 +270,8 @@ def export(objectslist, filename, argstring):
         gcode += "'Exported by FreeCAD\n"
         gcode += "'Post Processor: " + __name__ + "\n"
         gcode += "'Output Time:" + str(now) + "\n"
+        for f in Filters:
+            gcode += comment(f"Filter: {f.__class__.__name__}", True, force=True)
 
     def str_to_gcode(s):
         # one gcode
@@ -568,6 +599,14 @@ scommands = {
     "comment": { "fn" : comment },
 }
 
+def filter(pathobj, path_commands):
+    # an iterable of Path.Commands
+    # we return the filtered commands
+    filtered = path_commands # in case there are no filters
+    for f in Filters:
+        filtered = f.filter(pathobj, filtered)
+    return filtered
+
 def parse(pathobj):
     output = ""
     # Above list controls the order of parameters
@@ -588,7 +627,7 @@ def parse(pathobj):
         # so, tests disabled for those
         # no-other post-procesor tests AB (except linuxcnc which does not do getPathWithPlacement())
 
-        output += parse_list_of_commands( PathUtils.getPathWithPlacement(pathobj).Commands )
+        output += parse_list_of_commands( filter(pathobj, PathUtils.getPathWithPlacement(pathobj).Commands) )
 
     return output
 
