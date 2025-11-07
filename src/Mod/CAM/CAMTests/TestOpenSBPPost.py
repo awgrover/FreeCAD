@@ -622,3 +622,31 @@ J3,10.000,20.000,30.000
 '(finish operation: testpath)
 """
         )
+    
+    def test260(self):
+        """Test Helical Arc"""
+ 
+        c = "G2 X10 Y20 Z40 I1 J2 F99"
+
+        self.multi_compare( 
+            "G0 Z5", # the CG plunge is relative, so start from non-0 to test
+            "G2 X10 Y20 Z40 I1 J2 F99", # helical segment
+            "G0 Z5",
+            "G2 Z40 I1 J2 F98", # helical circle
+            "G0 Z5",
+            "G2 X50 Y60 I1 J2 F89", # segment
+            "--no-header --comments --no-show-editor",
+            """'(begin operation: testpath)
+'(Path: testpath)
+JZ,5.000
+JS,99.000,99.000
+CG,,10.000,20.000,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.000
+JZ,5.000
+JS,98.000,98.000
+CG,,,,1.000,2.000,T,1,35.000,,,,4,1,0 ' Z40.000
+JZ,5.000
+JS,89.000,
+CG,,50.000,60.000,1.000,2.000,T,1,0,,,,0,1,0
+'(finish operation: testpath)
+"""
+        )

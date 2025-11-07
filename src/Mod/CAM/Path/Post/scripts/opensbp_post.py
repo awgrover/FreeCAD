@@ -48,7 +48,6 @@ Path.write(object,"/path/to/file.ncc","post_opensbp")
 
 """
 ToDo
-    arc. have an implementation
     drilling.  Have outline, copy from estlcam_post or rrf_post
     fixtures/coordinate-systems. have outline.
 
@@ -194,13 +193,13 @@ def set_speeds_before_tool_change(obj):
 
     if obj.HorizFeed != 0.0:
         has_speed = True
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizFeed.getValueAs('mm/s')).Value),'.4f') )
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizFeed.getValueAs('mm/s')).Value),f".{PRECISION}f"))
     else:
         vs.append('')
         gcode += comment("(no HorizFeed)", True)
     if obj.HorizFeed != 0.0:
         has_speed = True
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertFeed.getValueAs('mm/s')).Value),'.4f') )
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertFeed.getValueAs('mm/s')).Value),f".{PRECISION}f"))
     else:
         vs.append('')
         gcode += comment("(no VertFeed)", True)
@@ -210,14 +209,14 @@ def set_speeds_before_tool_change(obj):
     vs.append('') # b-move-speed
 
     if obj.HorizRapid != 0.0:
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizRapid.getValueAs('mm/s')).Value),'.4f') )
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizRapid.getValueAs('mm/s')).Value),f".{PRECISION}f"))
         has_speed = True
     else:
         vs.append('')
         gcode += comment("(no HorizRapid)", True)
 
     if obj.VertRapid != 0.0:
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),'.4f') )
+        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),f".{PRECISION}f"))
         has_speed = True
     else:
         vs.append('')
@@ -248,8 +247,6 @@ def export(objectslist, filename, argstring):
         "A": 0,
         "B": 0,
         "C": None, "U": None, "V": None, "W": None, # axis not available
-        "F": 0,
-        "S": 0,
         "JSXY": 0,
         "JSZ": 0,
         "MSXY": 0,
@@ -365,7 +362,7 @@ def export(objectslist, filename, argstring):
     else:
         final = gcode
 
-    FreeCAD.Console.PrintMessage("done postprocessing. {CurrentState['gcode_line_number']} gcodes.\n")
+    FreeCAD.Console.PrintMessage(f"done postprocessing. {CurrentState['gcode_line_number']} gcodes.\n")
 
     # Write the output
     if filename != "-":
@@ -379,30 +376,9 @@ def gcodecomment(command,prefix=''):
     # return the gcode as a trailing comment if appropriate
     return f" '{prefix}{command.toGCode()}" if Arguments.gcode_comments else ''
 
-def move(command):
-    txt = ""
-
-    axis = ""
-    # we don't do CUVW
-    for p in ("C", "U", "V", "W"):
-        if p in command.Parameters:
-            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-            message = f"We can't do axis {p} (or any of CUVW) in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
-            FreeCAD.Console.PrintError(message)
-            raise NotImplementedError(message)
-
-    for p in ALLOWED_AXIS : # we don't do CUVW
-        if p in command.Parameters:
-            if Arguments.axis_modal:
-                if (
-                    (CurrentState['Absolute'] and command.Parameters[p] != CurrentState[p])
-                    or (not CurrentState['Absolute'] and command.Parameters[p] != 0)
-                ):
-                    axis += p
-            else:
-                axis += p
-
+def adjust_speed(command, axis):
     # Handle speed change
+    txt = ''
     if "F" in command.Parameters:
         if command.Name in {"G1", "G01"}:  # move
             movetype = "MS"
@@ -417,20 +393,52 @@ def move(command):
             speed_val = GetValue(speed)
             if CurrentState[speed_key] != speed_val:
                 CurrentState[speed_key] = speed_val
-                zspeed = "{:f}".format(speed_val)
+                zspeed = format(speed_val, f".{PRECISION}f")
         if ("X" in axis) or ("Y" in axis):
-            speed_key = "{}XY".format(movetype)
+            speed_key = f"{movetype}XY"
             speed_val = GetValue(speed)
             if CurrentState[speed_key] != speed_val:
                 CurrentState[speed_key] = speed_val
-                xyspeed = "{:f}".format(speed_val)
+                xyspeed = format(speed_val, f".{PRECISION}f")
 
         if "A" in axis or "B" in axis:
             opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-            FreeCAD.Console.PrintWarning("WARNING: we aren't handling speed for A and B axis in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}\n")
+            FreeCAD.Console.PrintWarning("WARNING: we aren't handling speed for A and B axis in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}\n")
 
         if zspeed or xyspeed:
             txt += f"{movetype},{xyspeed},{zspeed}{gcodecomment(command)}\n"
+
+    return txt
+
+def axis_list(command):
+    # which axis are in this command that we should emit
+    axis = ""
+    # we don't do CUVW
+    for p in ("C", "U", "V", "W"):
+        if p in command.Parameters:
+            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+            message = f"We can't do axis {p} (or any of CUVW) in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
+            FreeCAD.Console.PrintError(message)
+            raise NotImplementedError(message)
+
+    for p in ALLOWED_AXIS : # we don't do CUVW
+        if p in command.Parameters:
+            if Arguments.axis_modal:
+                if (
+                    (CurrentState['Absolute'] and command.Parameters[p] != CurrentState[p])
+                    or (not CurrentState['Absolute'] and command.Parameters[p] != 0)
+                ):
+                    axis += p
+            else:
+                axis += p
+    return axis
+
+def move(command):
+    txt = ""
+
+    axis = axis_list(command)
+
+    txt += adjust_speed(command, axis)
 
     # Actual move
 
@@ -471,7 +479,7 @@ def move(command):
         pass
     else:
         opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-        message = f"I don't know how to handle '{axis}' for a move in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
+        message = f"I don't know how to handle '{axis}' for a move in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
         FreeCAD.Console.PrintWarning(CurrentState+"\n")
         FreeCAD.Console.PrintWarning(command.toGCode() + "\n")
         FreeCAD.Console.PrintError(message)
@@ -481,25 +489,101 @@ def move(command):
     if len(txt) != txt_len_before_move:
         txt += gcodecomment(command)
         txt += "\n"
-
+    
     return txt
 
 
 def arc(command):
+    # only center-format: IJ
+    # only absolute mode
+    # only xy plane
+    # cases:
+    #   current-position is start
+    #   Z causes helical-arc
+    #   Pn causes arc-as-defined + (n-1) whole circles: not handled
+    #   XY is the end-position for a segment
+    #   none of XY means whole circle
+    #   IJ is the location of the arc-center: an offset. at least one of is required
+    #   F is required
+
+    # we would have to generate multiple CG's for repetitions (P)
+    not_handled_parameters = [ 'P', 'R', 'K' ]
+    not_handled = [ a for a in command.Parameters if a in not_handled_parameters ]
+    if not_handled:
+        opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+        message = f"We can't do parameters {not_handled} for an arc in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
+        FreeCAD.Console.PrintError(message)
+        if Arguments.abort_on_unknown:
+            raise NotImplementedError(message)
+        else:
+            return ''
+    
+    if not CurrentState['Absolute']:
+        opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+        message = f"We can't do relative mode for arcs in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
+        FreeCAD.Console.PrintError(message)
+        if Arguments.abort_on_unknown:
+            raise NotImplementedError(message)
+        else:
+            return ''
+
     if command.Name == "G2":  # CW
         dirstring = "1"
     else:  # G3 means CCW
         dirstring = "-1"
-    txt = "CG,,"
-    txt += format(GetValue(command.Parameters["X"]), FloatPrecision) + ","
-    txt += format(GetValue(command.Parameters["Y"]), FloatPrecision) + ","
-    txt += format(GetValue(command.Parameters["I"]), FloatPrecision) + ","
-    txt += format(GetValue(command.Parameters["J"]), FloatPrecision) + ","
-    txt += "T" + ","
-    txt += dirstring
+    txt = ""
+
+    axis = axis_list(command)
+
+    txt += adjust_speed(command, axis+"XY") # always xy
+
+    txt += "CG,"
+    txt += "," # no diameter
+    # end
+    if 'X' not in command.Parameters and 'Y' not in command.Parameters:
+        # circle
+        txt += ","
+        txt += ","
+    else:
+        # segment
+        txt += format(GetValue(command.Parameters["X"]), f".{PRECISION}f") + ","
+        txt += format(GetValue(command.Parameters["Y"]), f".{PRECISION}f") + ","
+    # Center is at offset:
+    txt += format(GetValue(command.Parameters["I"]) if 'I' in command.Parameters.keys() else 0.0, f".{PRECISION}f")  + ","
+    txt += format(GetValue(command.Parameters["J"]) if 'J' in command.Parameters.keys() else 0.0, f".{PRECISION}f")  + ","
+    txt += "T" + "," # move on diameter
+    txt += dirstring + ","
+
+    if 'Z' in command.Parameters:
+        # Z causes a helical, "causes the defined plunge to be made gradually as the cutter is circling down"
+        plunge = GetValue(command.Parameters["Z"]) - CurrentState['Z'] # negative for plunge down
+        txt += format(plunge, f".{PRECISION}f") + ","
+    else:
+        plunge = 0
+        txt += "0,"
+
+    txt += "," # repetitions
+    txt += "," # proportion-x
+    txt += "," # proportion-y
+    if 'Z' in command.Parameters:
+        # helical cases
+        if 'X' not in command.Parameters and 'Y' not in command.Parameters:
+            # circle
+            feature = 4 # spiral w/bottom pass
+        else:
+            feature = 3 # spiral
+    else:
+        feature = 0
+
+    txt += f"{feature},"
+    txt += "1," # continue the CG plunging (don't pull up)
+    txt += "0" # no move before plunge
+
+    # actual Z, opensbp plunge is a delta
+    if 'Z' in command.Parameters:
+        txt += " ' Z" + format(GetValue(command.Parameters["Z"]), f".{PRECISION}f")
     txt += "\n"
     return txt
-
 
 def tool_change(command):
     txt = ""
@@ -595,7 +679,7 @@ def coordinate_system(command):
 
     if which != 1:
         opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-        message = f"coordinate-system not supported (only G54/1) in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
+        message = f"coordinate-system not supported (only G54/1) in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
         FreeCAD.Console.PrintError(message)
         raise NotImplementedError(message)
 
@@ -683,14 +767,19 @@ def translate_commands(commands):
             last_gcode = c.toGCode()
 
             output += scommands[command]['fn'](c)
+
+            # Track axis positions
+            # other current-state must be handled in each command translator (e.g. JSXY)
             if c.Parameters:
-                CurrentState.update(c.Parameters)
+                for k in ALLOWED_AXIS:
+                    if k in c.Parameters:
+                        CurrentState[k] = c.Parameters[k] if CurrentState['Absolute'] else (CurrentState[k] + c.Parameters[k])
         elif command == '':
             # skip empties
             pass
         else:
             opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-            message = f"gcode not handled in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode}"
+            message = f"gcode not handled in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
             if Arguments.abort_on_unknown and command not in SKIP_UNKNOWN:
                 FreeCAD.Console.PrintError(message+"\n")
                 raise NotImplementedError(message)
