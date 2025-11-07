@@ -304,7 +304,7 @@ JZ,40.0000
 
     def test080(self):
         """
-        Test tool change
+        Test tool change, and spindle
         """
 
         # both tool and spindle: manual
@@ -331,18 +331,34 @@ PAUSE
 
         # both tool and spindle: auto
         self.multi_compare( *gcode_in,
-            "--toolchanger --spindlecontroller --no-header --no-show-editor",
+            "--toolchanger --spindle-controller --no-header --no-show-editor",
             """&Tool=2
 C9 'toolchanger
 &ToolName="2"
 TR,3000
-C6 'spindlecontroller
+C6 'spindle-controller
+PAUSE 3
+&Tool=3
+C9 'toolchanger
+&ToolName="3"
+"""
+        )
+        # auto-spindle with wait
+        self.multi_compare( *gcode_in,
+            "--toolchanger --spindle-controller --wait-for-spindle 2 --no-header --no-show-editor",
+            """&Tool=2
+C9 'toolchanger
+&ToolName="2"
+TR,3000
+C6 'spindle-controller
+PAUSE 2
 &Tool=3
 C9 'toolchanger
 &ToolName="3"
 """
         )
 
+    
     def test090(self):
         """
         Test comment
@@ -591,7 +607,7 @@ J3,10.0000,20.0000,30.0000
 
         c = "G0 X10 Y20 Z30"
 
-        self.multi_compare( "G54", "G54.1 P1", "G59 P1",
+        self.multi_compare( "G54",
             "--no-header --comments --no-show-editor",
             """'(begin operation: testpath)
 '(Path: testpath)

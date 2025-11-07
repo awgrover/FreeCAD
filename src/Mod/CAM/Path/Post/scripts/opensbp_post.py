@@ -61,6 +61,7 @@ ToDo
 now = datetime.datetime.now()
 
 PRECISION = 4
+SKIP_UNKNOWN = [] # gcodes to skip if --abort-on-unknown
 
 parser = argparse.ArgumentParser(prog="opensbp", add_help=False)
 parser.add_argument("--header", action=argparse.BooleanOptionalAction, help="include header output. deafault=True", default=True)
@@ -100,9 +101,12 @@ parser.add_argument(
     # this should probably be True for most shopbot installations
     "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
 )
+parser.add_argument("--abort-on-unknown", action=argparse.BooleanOptionalAction, help="Generate an error and fail if an unknown gcode is seen. default=True", default=True)
+parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, change them to a comment. E.g. --skip-unknown G55,G56")
 parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
-parser.add_argument("--spindlecontroller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
-parser.add_argument("--gcodecomments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
+parser.add_argument("--spindle-controller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
+parser.add_argument("--wait-for-spindle", type=int, help="How long to wait after a spindle-speed change, only if --spindle-controller. Default=3", default=3)
+parser.add_argument("--gcode-comments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
 
 
 Arguments = None # updated at export() time with parser.parse_args
@@ -128,6 +132,7 @@ FloatPrecision = None # setup in processArguments
 def processArguments(argstring):
 
     global PRECISION
+    global SKIP_UNKNOWN
     global GetValue
     global FloatPrecision
     global Arguments
@@ -144,6 +149,10 @@ def processArguments(argstring):
     if Arguments.precision is not None:
         PRECISION = int(Arguments.precision)
     FloatPrecision = f".{PRECISION}f" # always set
+
+    if Arguments.skip_unknown is not None:
+        SKIP_UNKNOWN = Arguments.skip_unknown.split(',')
+        
 
 def set_speeds_before_tool_change(obj):
     # on tool change, expicitly set speeds to compensate for missing F parameters on early movements
@@ -223,6 +232,7 @@ def export(objectslist, filename, argstring):
         "Tool" : None, # None on first time, then the number
         "ToolController" : None, # a toolcontroller object from the document
         "Absolute" : True, # G91 puts in relative
+        "Operation" : None, # updated in parse_list_of_commands() when we start each operation
     }
     print("postprocessing...")
     gcode = ""
@@ -259,6 +269,8 @@ def export(objectslist, filename, argstring):
             CurrentState['ToolController'] = obj # .Tool.Label is the tool name
 
         # do the pre_op
+        if hasattr(obj, "Proxy") and isinstance(obj.Proxy, Path.Op.Base.ObjectOp):
+            CurrentState['Operation'] = obj
         gcode += comment(f"(begin operation: {obj.Label})", True)
 
         gcode += parse(obj)
@@ -321,7 +333,7 @@ def export(objectslist, filename, argstring):
 
 def gcodecomment(command,prefix=''):
     # return the gcode as a trailing comment if appropriate
-    return f" '{prefix}{command.toGCode()}" if Arguments.gcodecomments else ''
+    return f" '{prefix}{command.toGCode()}" if Arguments.gcode_comments else ''
 
 def move(command):
     txt = ""
@@ -469,7 +481,7 @@ def tool_change(command):
     return txt
 
 
-def comment(command, keepparens=False):
+def comment(command, keepparens=False, force=False):
     # comments from gcode are stripped of ()
     # comments we generate include ()
 
@@ -478,7 +490,7 @@ def comment(command, keepparens=False):
     if isinstance(command, Path.Command):
         command = command.Name
 
-    if Arguments.comments:
+    if Arguments.comments or force:
         return f"'{command if keepparens else command[1:-1]}\n"
     else:
         print("a comment", command)
@@ -500,8 +512,10 @@ def spindle(command):
     else:
         pass
     txt += f"TR,{int(command.Parameters['S'])}\n"
-    if Arguments.spindlecontroller:
-        txt += "C6 'spindlecontroller\n"
+    if Arguments.spindle_controller:
+        txt += "C6 'spindle-controller\n"
+        if Arguments.wait_for_spindle > 0:
+            txt += f"PAUSE {Arguments.wait_for_spindle}\n"
     else:
         txt += f"'Change spindle speed to {int(command.Parameters['S'])}\n" # prompt
         txt += "PAUSE\n" # causes a modal to ask "ok?"
@@ -537,23 +551,23 @@ def coordinate_system(command):
 
 # Supported Commands
 scommands = {
-    "G0": { "fn" : move, "modal" : True },
-    "G1": { "fn" : move, "modal" : True },
-    "G2": { "fn" : arc, "modal" : True },
-    "G3": { "fn" : arc, "modal" : True },
-    "M6": { "fn" : tool_change, "modal" : True },
-    "M3": { "fn" : spindle, "modal" : True },
-    "G00": { "fn" : move, "modal" : True },
-    "G01": { "fn" : move, "modal" : True },
-    "G02": { "fn" : arc, "modal" : True },
-    "G03": { "fn" : arc, "modal" : True },
-    "M06": { "fn" : tool_change, "modal" : True },
-    "M03": { "fn" : spindle, "modal" : True },
-    "G91" : { "fn" : relative_positions, "modal" : True },
-    "G90" : { "fn" : absolute_positions, "modal" : True },
-    "G54" : { "fn" : coordinate_system, "modal" : True },
+    "G0": { "fn" : move },
+    "G1": { "fn" : move },
+    "G2": { "fn" : arc },
+    "G3": { "fn" : arc },
+    "M6": { "fn" : tool_change },
+    "M3": { "fn" : spindle },
+    "G00": { "fn" : move },
+    "G01": { "fn" : move },
+    "G02": { "fn" : arc },
+    "G03": { "fn" : arc },
+    "M06": { "fn" : tool_change },
+    "M03": { "fn" : spindle },
+    "G91" : { "fn" : relative_positions },
+    "G90" : { "fn" : absolute_positions },
+    "G54" : { "fn" : coordinate_system },
 
-    "comment": { "fn" : comment, "modal" : True },
+    "comment": { "fn" : comment },
 }
 
 def parse(pathobj):
@@ -586,7 +600,7 @@ def parse_list_of_commands(commands):
 
         if command in scommands:
             # skip duplicate commands
-            if Arguments.modal and c.toGCode() == last_gcode and scommands[command]['modal']:
+            if Arguments.modal and c.toGCode() == last_gcode:
                 # Don't elide movements if relative motion, it isn't a noop!
                 if set(ALLOWED_AXIS) & set( c.Parameters.keys() ):
                     if CurrentState['Absolute']:
@@ -599,8 +613,18 @@ def parse_list_of_commands(commands):
             output += scommands[command]['fn'](c)
             if c.Parameters:
                 CurrentState.update(c.Parameters)
+        elif command == '':
+            # skip empties
+            pass
         else:
-            print(f"I don't know the (gcode) command: {command}")
+            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+            if Arguments.abort_on_unknown and command not in SKIP_UNKNOWN:
+                message = f"gcode not handled in operation {opname}: {c.toGCode()}"
+                FreeCAD.Console.PrintError(message+"\n")
+                raise NotImplementedError(message)
+            else:
+                output += comment(f"not handled: {c.toGCode()}", True, force=True)
+                FreeCAD.Console.PrintWarning(f"Skipped unknown gcode {'in '+opname if opname else ''}: {c.toGCode()}\n")
 
     return output
 
