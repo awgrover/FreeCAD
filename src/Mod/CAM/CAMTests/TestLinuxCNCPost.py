@@ -86,6 +86,7 @@ class TestLinuxCNCPost(PathTestUtils.PathTestBase):
             self.docobj.Path = Path.Path([Path.Command(path_string)])
         else:
             self.docobj.Path = Path.Path([])
+        print(f"### c6 {self.docobj.Path.Commands}")
         postables = [self.docobj]
         gcode = postprocessor.export(postables, "-", args)
         if debug:
@@ -105,6 +106,7 @@ class TestLinuxCNCPost(PathTestUtils.PathTestBase):
         # Only test length of result.
         args = "--no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
+        print("###"+gcode+"<<<EOS")
         self.assertTrue(len(gcode.splitlines()) == 13)
 
         # Test without header

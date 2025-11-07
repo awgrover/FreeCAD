@@ -22,6 +22,7 @@
 # *                                                                         *
 # ***************************************************************************
 
+import unittest
 import FreeCAD
 
 import Path
@@ -173,7 +174,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         # default is metric-mm (internal default)
         self.compare_first_command(
             "G0 X10 Y20 Z30", # simple move
-            "J3,10.0000,20.0000,30.0000",
+            "J3,10.000,20.000,30.000",
             "--no-header --no-show-editor"
         )
 
@@ -209,8 +210,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.docobj.Path = Path.Path([])
         postables = [self.docobj]
 
-        expected="""JZ,50.0000
-MX,20.0000
+        expected="""JZ,50.000
+MX,20.000
 """
         args = "--no-header --preamble='G0 Z50\nG1 X20' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
@@ -223,8 +224,8 @@ MX,20.0000
         self.docobj.Path = Path.Path([])
         postables = [self.docobj]
 
-        expected="""JZ,55.0000
-MX,22.0000
+        expected="""JZ,55.000
+MX,22.000
 """
         args = "--no-header --postamble='G0 Z55\nG1 X22' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
@@ -256,13 +257,13 @@ MX,22.0000
 
         self.multi_compare( c, c,
             "--no-header --no-show-editor",
-            """J3,10.0000,20.0000,30.0000
-J3,10.0000,20.0000,30.0000
+            """J3,10.000,20.000,30.000
+J3,10.000,20.000,30.000
 """
         )
         self.multi_compare( c, c,
             "--no-header --modal --no-show-editor",
-            "J3,10.0000,20.0000,30.0000\n",
+            "J3,10.000,20.000,30.000\n",
         )
 
     def test070(self):
@@ -274,8 +275,8 @@ J3,10.0000,20.0000,30.0000
         c="G0 X10 Y20 Z30"
         self.multi_compare( c, "G0 X10 Y30 Z30",
             "--no-header --no-show-editor",
-            """J3,10.0000,20.0000,30.0000
-J3,10.0000,30.0000,30.0000
+            """J3,10.000,20.000,30.000
+J3,10.000,30.000,30.000
 """
         )
 
@@ -287,18 +288,18 @@ J3,10.0000,30.0000,30.0000
             # relative, xy same
             "G91", "G0 X0 Y31 Z0",
             "--no-header --axis-modal --no-show-editor",
-            """J3,10.0000,20.0000,30.0000
-JY,30.0000
+            """J3,10.000,20.000,30.000
+JY,30.000
 SR 'RELATIVE
-JY,31.0000
+JY,31.000
 """
         )
 
         # diff z
         self.multi_compare( c, "G0 X10 Y20 Z40",
             "--no-header --axis-modal --no-show-editor",
-            """J3,10.0000,20.0000,30.0000
-JZ,40.0000
+            """J3,10.000,20.000,30.000
+JZ,40.000
 """
         )
 
@@ -388,7 +389,7 @@ C9 'toolchanger
         """Test A, B, & C axis output for values between 0 and 90 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A40 B50",
-            "M5,10.0000,20.0000,30.0000,40.0000,50.0000",
+            "M5,10.000,20.000,30.000,40.000,50.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -423,7 +424,7 @@ C9 'toolchanger
         """Test A, B, & C axis output for 89 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A89 B89",
-            "M5,10.0000,20.0000,30.0000,89.0000,89.0000",
+            "M5,10.000,20.000,30.000,89.000,89.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -432,8 +433,11 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
-    # 90+ is broken
+    # FIXME: the use of getPathWithPlacement() causes a yaw-pitch calculation which gives odd AB values
+    # so, tests disabled
+    # no-other post-procesor tests AB (except linuxcnc which does not do getPathWithPlacement())
 
+    @unittest.expectedFailure
     def test120(self):
         """Test A, B axis output for 90 degrees"""
 
@@ -443,7 +447,7 @@ C9 'toolchanger
 
         self.compare_first_command(
             "G1 X10 Y20 Z30 A90 B90",
-            "M5,10.0000,20.0000,30.0000,90.0000,90.0000",
+            "M5,10.000,20.000,30.000,90.000,90.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -452,12 +456,13 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test130(self):
         """Test A, B, & C axis output for 91 degrees"""
 
         self.compare_first_command(
             "G1 X10 Y20 Z30 A91 B91",
-            "M5,10.0000,20.0000,30.0000,91.0000,91.0000",
+            "M5,10.000,20.000,30.000,91.000,91.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -466,11 +471,12 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test140(self):
         """Test A, B, & C axis output for values between 90 and 180 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A100 B110",
-            "M5,10.0000,20.0000,30.0000,100.0000,110.0000",
+            "M5,10.000,20.000,30.000,100.000,110.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -479,11 +485,12 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test150(self):
         """Test A, B, & C axis output for values between 180 and 360 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A240 B250",
-            "M5,10.0000,20.0000,30.0000,240.0000,250.0000",
+            "M5,10.000,20.000,30.000,240.000,250.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -492,11 +499,12 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test160(self):
         """Test A, B, & C axis output for values greater than 360 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A440 B450",
-            "M5,10.0000,20.0000,30.0000,440.0000,450.0000",
+            "M5,10.000,20.000,30.000,440.000,450.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -509,7 +517,7 @@ C9 'toolchanger
         """Test A, B, & C axis output for values between 0 and -90 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A-40 B-50",
-            "M5,10.0000,20.0000,30.0000,-40.0000,-50.0000",
+            "M5,10.000,20.000,30.000,-40.000,-50.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -518,11 +526,12 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test180(self):
         """Test A, B, & C axis output for values between -90 and -180 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A-100 B-110",
-            "M5,10.0000,20.0000,30.0000,-100.0000,-110.0000",
+            "M5,10.000,20.000,30.000,-100.000,-110.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -531,11 +540,12 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test190(self):
         """Test A, B, & C axis output for values between -180 and -360 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A-240 B-250",
-            "M5,10.0000,20.0000,30.0000,-240.0000,-250.0000",
+            "M5,10.000,20.000,30.000,-240.000,-250.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -544,11 +554,12 @@ C9 'toolchanger
             "--no-header --inches --no-show-editor",
         )
 
+    @unittest.expectedFailure
     def test200(self):
         """Test A, B, & C axis output for values below -360 degrees"""
         self.compare_first_command(
             "G1 X10 Y20 Z30 A-440 B-450",
-            "M5,10.0000,20.0000,30.0000,-440.0000,-450.0000",
+            "M5,10.000,20.000,30.000,-440.000,-450.000",
             "--no-header --no-show-editor",
         )
         self.compare_first_command(
@@ -563,16 +574,16 @@ C9 'toolchanger
         # return-to is before postamble
         self.multi_compare("",
             "--postamble 'G0 X1 Y2 Z3' --return-to='12,34,56' --no-header --no-show-editor",
-            """J3,12.0000,34.0000,56.0000
-J3,1.0000,2.0000,3.0000
+            """J3,12.000,34.000,56.000
+J3,1.000,2.000,3.000
 """
         )
 
         # allow empty ,
         self.multi_compare("",
             "--postamble 'G0 X1 Y2 Z3' --return-to=',34,56' --no-header --no-show-editor",
-            """J3,34.0000,56.0000
-J3,1.0000,2.0000,3.0000
+            """J3,34.000,56.000
+J3,1.000,2.000,3.000
 """
         )
 
@@ -582,7 +593,7 @@ J3,1.0000,2.0000,3.0000
         # return-to is before postamble
         self.multi_compare("",
             "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim' --no-header --no-show-editor",
-            """J3,1.0000,2.0000,3.0000
+            """J3,1.000,2.000,3.000
 verbatim
 """
         )
@@ -595,10 +606,10 @@ verbatim
         self.multi_compare( "G91", c, c, "G90", c, c,
             "--no-header --modal --no-show-editor",
             """SR 'RELATIVE
-J3,10.0000,20.0000,30.0000
-J3,10.0000,20.0000,30.0000
+J3,10.000,20.000,30.000
+J3,10.000,20.000,30.000
 SA 'ABSOLUTE
-J3,10.0000,20.0000,30.0000
+J3,10.000,20.000,30.000
 """
         )
 

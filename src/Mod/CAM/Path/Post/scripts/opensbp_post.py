@@ -45,22 +45,16 @@ Path.write(object,"/path/to/file.ncc","post_opensbp")
 """
 
 """
-DONE:
-    uses native commands
-    handles feed and jog moves
-    handles XY, Z, and XYZ feed speeds
-    handles arcs
-    support for inch output
 ToDo
-    comments may not format correctly
-    drilling.  Haven't looked at it.
-    many other things
+    arc. have an implementation
+    drilling.  Have outline, copy from estlcam_post or rrf_post
+    fixtures/coordinate-systems. have outline.
 
 """
 
 now = datetime.datetime.now()
 
-PRECISION = 4
+PRECISION = 3 # default is metric
 SKIP_UNKNOWN = [] # gcodes to skip if --abort-on-unknown
 
 parser = argparse.ArgumentParser(prog="opensbp", add_help=False)
@@ -73,7 +67,8 @@ parser.add_argument(
     help="don't pop up editor before writing output",
     default=True
 )
-parser.add_argument("--precision", default=str(PRECISION), help=f"number of digits of precision, default={PRECISION}")
+# no default so that --inches/--metric can set the default for that mode
+parser.add_argument("--precision", help=f"number of digits of precision, default={PRECISION}")
 parser.add_argument(
     "--preamble",
     help='set g-code commands to be issued before the first command, multi-line g-code w/ \\n, default=None',
@@ -142,13 +137,16 @@ def processArguments(argstring):
     # GetValue has a default when it gets here, so if no arg, then we stay metric
     if Arguments.inches:
         GetValue = getImperialValue
+        PRECISION = 4
     # nb: as override when --inches
     if Arguments.metric:
         GetValue = getMetricValue
+        PRECISION = 3
 
     if Arguments.precision is not None:
         PRECISION = int(Arguments.precision)
-    FloatPrecision = f".{PRECISION}f" # always set
+
+    FloatPrecision = f".{PRECISION}f"
 
     if Arguments.skip_unknown is not None:
         SKIP_UNKNOWN = Arguments.skip_unknown.split(',')
@@ -585,6 +583,11 @@ def parse(pathobj):
             return output
 
         output += comment(f"(Path: {pathobj.Label})", True)
+
+        # FIXME: the use of getPathWithPlacement() causes a yaw-pitch calculation which gives odd AB values
+        # so, tests disabled for those
+        # no-other post-procesor tests AB (except linuxcnc which does not do getPathWithPlacement())
+
         output += parse_list_of_commands( PathUtils.getPathWithPlacement(pathobj).Commands )
 
     return output
