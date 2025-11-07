@@ -380,7 +380,7 @@ def adjust_speed(command, axis):
     # Handle speed change
     txt = ''
     if "F" in command.Parameters:
-        if command.Name in {"G1", "G01"}:  # move
+        if normalized(command.Name) == "G01":  # move
             movetype = "MS"
         else:  # jog
             movetype = "JS"
@@ -442,7 +442,7 @@ def move(command):
 
     # Actual move
 
-    if command.Name in {"G0", "G00"}:
+    if normalized(command.Name) == "G00":
         pref = "J"
     else:
         pref = "M"
@@ -527,7 +527,7 @@ def arc(command):
         else:
             return ''
 
-    if command.Name == "G2":  # CW
+    if normalized(command.Name) == "G02":  # CW
         dirstring = "1"
     else:  # G3 means CCW
         dirstring = "-1"
@@ -642,7 +642,7 @@ def relative_positions(command):
 
 def spindle(command):
     txt = ""
-    if command.Name == "M3":  # CW
+    if normalized(command.Name) == "M03":  # CW
         pass
     else:
         pass
@@ -691,12 +691,7 @@ def coordinate_system(command):
 
 # Supported Commands
 scommands = {
-    "G0": { "fn" : move },
-    "G1": { "fn" : move },
-    "G2": { "fn" : arc },
-    "G3": { "fn" : arc },
-    "M6": { "fn" : tool_change },
-    "M3": { "fn" : spindle },
+    # single digit Gn's are normalized to G00 before a fn sees them
     "G00": { "fn" : move },
     "G01": { "fn" : move },
     "G02": { "fn" : arc },
@@ -744,15 +739,20 @@ def parse(pathobj):
 
     return output
 
+def normalized(gcode_name):
+    # normalize single digit Gn to G0n
+    return re.sub(r'^([A-Z])([0-9])$',r'\g<1>0\g<2>', gcode_name)
+
 def translate_commands(commands):
     output = ""
     last_gcode = ''
     for c in commands:
         CurrentState['gcode_line_number'] += 1 # i.e. from Freecad gcode
 
-        command = c.Name
-        if command.startswith("("):
+        if c.Name.startswith("("):
             command = 'comment'
+        else:
+            command = normalized(c.Name)
 
         if command in scommands:
             # skip duplicate commands
@@ -779,7 +779,7 @@ def translate_commands(commands):
             pass
         else:
             opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-            message = f"gcode not handled in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
+            message = f"gcode not handled in [{CurrentState['gcode_line_number']}] {opname} {c.toGCode()}"
             if Arguments.abort_on_unknown and command not in SKIP_UNKNOWN:
                 FreeCAD.Console.PrintError(message+"\n")
                 raise NotImplementedError(message)
