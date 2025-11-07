@@ -583,13 +583,14 @@ J3,1.000,2.000,3.000
         )
 
     def test220(self):
-        """Test native-postamble"""
+        """Test native-pre/postamble"""
 
         # return-to is before postamble
         self.multi_compare("",
-            "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim' --no-header --no-show-editor",
-            """J3,1.000,2.000,3.000
-verbatim
+            "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim-post' --native-preamble 'verbatim-pre' --no-header --no-show-editor",
+            """verbatim-pre
+J3,1.000,2.000,3.000
+verbatim-post
 """
         )
 

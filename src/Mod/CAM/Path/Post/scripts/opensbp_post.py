@@ -72,6 +72,10 @@ parser.add_argument(
 # no default so that --inches/--metric can set the default for that mode
 parser.add_argument("--precision", help=f"number of digits of precision, default={PRECISION}")
 parser.add_argument(
+    "--native-preamble",
+    help='verbatim opensbp commands to be issued before the first command, multi-line w/ \\n. Before preamble. Consider a "Cn" or "FB". default=None',
+)
+parser.add_argument(
     "--preamble",
     help='set g-code commands to be issued before the first command, multi-line g-code w/ \\n, default=None',
 )
@@ -285,6 +289,13 @@ def export(objectslist, filename, argstring):
             FreeCAD.Console.PrintError(message)
             raise ValueError(message) from e
         return pc
+
+    if Arguments.native_preamble:
+        comment('(native preamble)',True)
+        pre_lines = Arguments.native_preamble.replace('\\n','\n')
+        if not pre_lines.endswith("\n"):
+            pre_lines += "\n"
+        gcode += pre_lines
 
     if Arguments.preamble:
         gcode += comment('(begin preamble)',True)
