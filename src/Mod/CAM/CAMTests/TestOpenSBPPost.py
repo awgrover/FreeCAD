@@ -22,6 +22,8 @@
 # *                                                                         *
 # ***************************************************************************
 
+import re
+
 import unittest
 import FreeCAD
 
@@ -75,6 +77,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         objects here that are needed for multiple `test()` methods.
         """
         self.doc = FreeCAD.ActiveDocument
+        self.doc.UnitSystem = 'Metric small parts & CNC (mm, mm/min)'
         self.con = FreeCAD.Console
         self.docobj = FreeCAD.ActiveDocument.addObject("Path::Feature", "testpath")
         reload(
@@ -100,7 +103,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             self.docobj.Path = Path.Path([])
 
         # opensbp is terse, no header/preamble/comments, so 1st line is 1st command
-        first_command = 0
 
         postables = [self.docobj]
         gcode = postprocessor.export(postables, "-", args)
@@ -111,13 +113,16 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             self.assertEqual(gcode, "")
         else:
             lines = gcode.splitlines()
-            self.assertGreater( len(lines), first_command ) # need at least first_command+1 lines
-            self.assertEqual(lines[first_command], expected)
+            first = next( (x for x in lines if not (re.match(r"['&]", x) or x.startswith('VD,')) ), '<no command line>' )
+            self.assertEqual(first, expected)
 
-    def multi_compare(self, *args, debug=False ):
+    def multi_compare(self, *args, remove=None, debug=False ):
         """Actually as if: ( *gcode, options, expected, debug=True )
+        `*gcode` is all str (gcodes), or None to use extant self.docobj
+        `remove` is a pattern to remove lines from both expected and generated
         """
-        self.docobj.Path = Path.Path([Path.Command(x) for x in args[:-2]])
+        if isinstance(args[0],str):
+            self.docobj.Path = Path.Path([ Path.Command(x) for x in args[:-2]])
         post_args = args[-2]
         expected = args[-1]
 
@@ -126,6 +131,11 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         if debug:
             nl="\n"
             print(f"--------{nl}{gcode}--------{nl}")
+        if remove:
+            expected = '\n'.join( (x for x in expected.split('\n') if not re.match(remove,x)) )
+            gcode =    '\n'.join( (x for x in gcode.split('\n')    if not re.match(remove,x)) )
+        #print(f"###E---{expected}---")
+        #print(f"###G---{gcode}---")
         self.assertEqual(gcode, expected)
 
     def test000(self):
@@ -134,36 +144,45 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
 
         self.docobj.Path = Path.Path([])
-        postables = [self.docobj]
 
         # Test generating with header
         # Header contains a time stamp that messes up unit testing.
-        # Only test length of result.
-        args = "--no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        # has .export been upgraded to return the gcode?
-        self.assertNotEqual(gcode, None)
-        self.assertEqual(len(gcode.splitlines()), 3)
+        self.multi_compare( None,
+            "--no-show-editor",
+            """'Exported by FreeCAD 1.0.2
+'Post Processor: Path.Post.scripts.opensbp
+'  --no-show-editor
+'Job: 
+'Output Time: 2025-11-12 15:42:12.237156
+&WASUNITS=%(25)
+VD,,,1
+VD,,,&WASUNITS
+""",
+    remove=r"'Output Time:"
+        )
 
         # Test without header
-        # opensbp is terse!
-        expected = ""
 
-        self.docobj.Path = Path.Path([])
-        postables = [self.docobj]
-
-        args = "--no-header --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode, expected)
+        self.multi_compare( None,
+            "--no-header --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,,1
+VD,,,&WASUNITS
+"""
+        )
 
         # With comments
-        expected="""'(begin operation: testpath)
+        self.multi_compare( None,
+            "--no-header --comments --no-show-editor",
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
 '(Path: testpath)
 '(finish operation: testpath)
+VD,,,&WASUNITS
 """
-        args = "--no-header --comments --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode, expected)
+        )
 
     def test010(self):
         """Test command Generation.
@@ -188,18 +207,18 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             "G0 X10 Y20 Z30",
             "--no-header --inches --no-show-editor",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 J3,0.3937,0.7874,1.1811
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """,
         )
         self.multi_compare(
             "G0 X10 Y20 Z30",
             "--no-header --inches --precision=2 --no-show-editor",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 J3,0.39,0.79,1.18
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -208,9 +227,9 @@ VD,,&WASUNITS
             "G0 X10 Y20 Z30",
             "--no-header --metric --precision=3 --no-show-editor",
             """&WASUNITS=%(25)
-VD,,1
+VD,,,1
 J3,10.000,20.000,30.000
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -222,8 +241,11 @@ VD,,&WASUNITS
         self.docobj.Path = Path.Path([])
         postables = [self.docobj]
 
-        expected="""JZ,50.000
+        expected="""&WASUNITS=%(25)
+VD,,,1
+JZ,50.000
 MX,20.000
+VD,,,&WASUNITS
 """
         args = "--no-header --preamble='G0 Z50\nG1 X20' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
@@ -236,8 +258,11 @@ MX,20.000
         self.docobj.Path = Path.Path([])
         postables = [self.docobj]
 
-        expected="""JZ,55.000
+        expected="""&WASUNITS=%(25)
+VD,,,1
+JZ,55.000
 MX,22.000
+VD,,,&WASUNITS
 """
         args = "--no-header --postamble='G0 Z55\nG1 X22' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
@@ -253,18 +278,18 @@ MX,22.000
             "G0 X10 Y20 Z30", # simple move
             "--no-header --no-show-editor --inches",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 J3,0.3937,0.7874,1.1811
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
         self.multi_compare(
             "G0 X10 Y20 Z30", # simple move
             "--no-header --no-show-editor --inches --precision 2",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 J3,0.39,0.79,1.18
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -277,13 +302,20 @@ VD,,&WASUNITS
 
         self.multi_compare( c, c,
             "--no-header --no-show-editor",
-            """J3,10.000,20.000,30.000
+            """&WASUNITS=%(25)
+VD,,,1
 J3,10.000,20.000,30.000
+J3,10.000,20.000,30.000
+VD,,,&WASUNITS
 """
         )
         self.multi_compare( c, c,
             "--no-header --modal --no-show-editor",
-            "J3,10.000,20.000,30.000\n",
+            """&WASUNITS=%(25)
+VD,,,1
+J3,10.000,20.000,30.000
+VD,,,&WASUNITS
+"""
         )
 
     def test070(self):
@@ -295,8 +327,11 @@ J3,10.000,20.000,30.000
         c="G0 X10 Y20 Z30"
         self.multi_compare( c, "G0 X10 Y30 Z30",
             "--no-header --no-show-editor",
-            """J3,10.000,20.000,30.000
+            """&WASUNITS=%(25)
+VD,,,1
+J3,10.000,20.000,30.000
 J3,10.000,30.000,30.000
+VD,,,&WASUNITS
 """
         )
 
@@ -308,18 +343,24 @@ J3,10.000,30.000,30.000
             # relative, xy same
             "G91", "G0 X0 Y31 Z0",
             "--no-header --axis-modal --no-show-editor",
-            """J3,10.000,20.000,30.000
+            """&WASUNITS=%(25)
+VD,,,1
+J3,10.000,20.000,30.000
 JY,30.000
 SR 'RELATIVE
 JY,31.000
+VD,,,&WASUNITS
 """
         )
 
         # diff z
         self.multi_compare( c, "G0 X10 Y20 Z40",
             "--no-header --axis-modal --no-show-editor",
-            """J3,10.000,20.000,30.000
+            """&WASUNITS=%(25)
+VD,,,1
+J3,10.000,20.000,30.000
 JZ,40.000
+VD,,,&WASUNITS
 """
         )
 
@@ -332,7 +373,10 @@ JZ,40.000
         gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
         self.multi_compare( *gcode_in,
             "--no-header --comments --no-show-editor",
-            """'(begin operation: testpath)
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
 '(Path: testpath)
 '(tool change)
 &Tool=2
@@ -347,13 +391,16 @@ PAUSE
 PAUSE
 &ToolName="3"
 '(finish operation: testpath)
+VD,,,&WASUNITS
 """,
         )
 
         # both tool and spindle: auto
         self.multi_compare( *gcode_in,
             "--toolchanger --spindle-controller --no-header --no-show-editor",
-            """&Tool=2
+            """&WASUNITS=%(25)
+VD,,,1
+&Tool=2
 C9 'toolchanger
 &ToolName="2"
 TR,3000
@@ -362,12 +409,15 @@ PAUSE 3
 &Tool=3
 C9 'toolchanger
 &ToolName="3"
+VD,,,&WASUNITS
 """
         )
         # auto-spindle with wait
         self.multi_compare( *gcode_in,
             "--toolchanger --spindle-controller --wait-for-spindle 2 --no-header --no-show-editor",
-            """&Tool=2
+            """&WASUNITS=%(25)
+VD,,,1
+&Tool=2
 C9 'toolchanger
 &ToolName="2"
 TR,3000
@@ -376,6 +426,7 @@ PAUSE 2
 &Tool=3
 C9 'toolchanger
 &ToolName="3"
+VD,,,&WASUNITS
 """
         )
 
@@ -388,21 +439,31 @@ C9 'toolchanger
         # we've always been no-comments default
         self.multi_compare( "(comment)",
             "--no-header --no-show-editor",
-            ""
+            """&WASUNITS=%(25)
+VD,,,1
+VD,,,&WASUNITS
+"""
         )
 
         self.multi_compare( "(comment)",
             "--no-header --comments --no-show-editor",
-            """'(begin operation: testpath)
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
 '(Path: testpath)
 'comment
 '(finish operation: testpath)
+VD,,,&WASUNITS
 """
         )
 
         self.multi_compare( "(comment)",
             "--no-header --no-comments --no-show-editor",
-            ""
+            """&WASUNITS=%(25)
+VD,,,1
+VD,,,&WASUNITS
+"""
         )
 
     def test100(self):
@@ -416,9 +477,9 @@ C9 'toolchanger
             "G1 X10 Y20 Z30 A40 B50",
             "--no-header --inches --no-show-editor",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 M5,0.3937,0.7874,1.1811,40.0000,50.0000
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -431,9 +492,9 @@ VD,,&WASUNITS
             "G1 X10 Y20 Z30 A40 B50",
             "--no-header --inches --no-show-editor",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 M5,0.3937,0.7874,1.1811,40.0000,50.0000
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -441,9 +502,9 @@ VD,,&WASUNITS
             "G1 X10 Y20 Z30 A40 B50",
             "--no-header --no-show-editor --inches --ab-is-distance",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 M5,0.3937,0.7874,1.1811,1.5748,1.9685
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -458,9 +519,9 @@ VD,,&WASUNITS
             "G1 X10 Y20 Z30 A89 B89",
             "--no-header --inches --no-show-editor",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 M5,0.3937,0.7874,1.1811,89.0000,89.0000
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -555,9 +616,9 @@ VD,,&WASUNITS
             "G1 X10 Y20 Z30 A-40 B-50",
             "--no-header --inches --no-show-editor",
             """&WASUNITS=%(25)
-VD,,0
+VD,,,0
 M5,0.3937,0.7874,1.1811,-40.0000,-50.0000
-VD,,&WASUNITS
+VD,,,&WASUNITS
 """
         )
 
@@ -609,16 +670,22 @@ VD,,&WASUNITS
         # return-to is before postamble
         self.multi_compare("",
             "--postamble 'G0 X1 Y2 Z3' --return-to='12,34,56' --no-header --no-show-editor",
-            """J3,12.000,34.000,56.000
+            """&WASUNITS=%(25)
+VD,,,1
+J3,12.000,34.000,56.000
 J3,1.000,2.000,3.000
+VD,,,&WASUNITS
 """
         )
 
         # allow empty ,
         self.multi_compare("",
             "--postamble 'G0 X1 Y2 Z3' --return-to=',34,56' --no-header --no-show-editor",
-            """J3,34.000,56.000
+            """&WASUNITS=%(25)
+VD,,,1
+J3,34.000,56.000
 J3,1.000,2.000,3.000
+VD,,,&WASUNITS
 """
         )
 
@@ -628,8 +695,11 @@ J3,1.000,2.000,3.000
         # return-to is before postamble
         self.multi_compare("",
             "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim-post' --native-preamble 'verbatim-pre' --no-header --no-show-editor",
-            """verbatim-pre
+            """&WASUNITS=%(25)
+VD,,,1
+verbatim-pre
 J3,1.000,2.000,3.000
+VD,,,&WASUNITS
 verbatim-post
 """
         )
@@ -641,11 +711,14 @@ verbatim-post
 
         self.multi_compare( "G91", c, c, "G90", c, c,
             "--no-header --modal --no-show-editor",
-            """SR 'RELATIVE
+            """&WASUNITS=%(25)
+VD,,,1
+SR 'RELATIVE
 J3,10.000,20.000,30.000
 J3,10.000,20.000,30.000
 SA 'ABSOLUTE
 J3,10.000,20.000,30.000
+VD,,,&WASUNITS
 """
         )
 
@@ -656,10 +729,14 @@ J3,10.000,20.000,30.000
 
         self.multi_compare( "G54",
             "--no-header --comments --no-show-editor",
-            """'(begin operation: testpath)
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
 '(Path: testpath)
 'G54 has no effect
 '(finish operation: testpath)
+VD,,,&WASUNITS
 """
         )
     
@@ -675,18 +752,65 @@ J3,10.000,20.000,30.000
             "G2 Z40 I1 J2 F98", # helical circle
             "G0 Z5",
             "G2 X50 Y60 I1 J2 F89", # segment
-            "--no-header --comments --no-show-editor",
-            """'(begin operation: testpath)
-'(Path: testpath)
+            "--no-header --no-comments --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,,1
 JZ,5.000
-JS,99.000,99.000
+MS,99.000,99.000
 CG,,10.000,20.000,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.000
 JZ,5.000
-JS,98.000,98.000
-CG,,,,1.000,2.000,T,1,35.000,,,,4,1,0 ' Z40.000
+MS,98.000,98.000
+CG,,,,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.000
 JZ,5.000
-JS,89.000,
+MS,89.000,
 CG,,50.000,60.000,1.000,2.000,T,1,0,,,,0,1,0
+VD,,,&WASUNITS
+"""
+        )
+
+    def test270(self):
+        """Test M00 w/prompt (pause)"""
+ 
+        self.multi_compare( 
+            "(With Prompt)", "M0",
+            "--no-header --comments --no-show-editor",
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
+'(Path: testpath)
+'With Prompt
+PAUSE
 '(finish operation: testpath)
+VD,,,&WASUNITS
+"""
+        )
+
+        self.multi_compare( 
+            # Include the preceding comment even if no-comments
+            "(With Prompt)", "M0",
+            "--no-header --no-comments --no-show-editor",
+            """&WASUNITS=%(25)
+VD,,,1
+'With Prompt
+PAUSE
+VD,,,&WASUNITS
+"""
+        )
+
+        self.multi_compare( 
+            "(Doesn't count as prompt)","G0 X0", "M0", # no prompt
+            "--no-header --comments --no-show-editor",
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
+'(Path: testpath)
+'Doesn't count as prompt
+JX,0.000
+'Continue?
+PAUSE
+'(finish operation: testpath)
+VD,,,&WASUNITS
 """
         )

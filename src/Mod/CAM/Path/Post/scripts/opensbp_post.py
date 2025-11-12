@@ -88,15 +88,16 @@ parser.add_argument(
     help='verbatim opensbp commands to be issued after the last command, multi-line w/ \\n. After postamble. Consider a "Cn" or "FB". default=None',
 )
 parser.add_argument(
-    # nb, no default (so --inches and allow --inches --metric)
-    "--metric", action="store_true", help="Convert output for US imperial mode, default"
+    # nb, no 'default=' so we can use the App.ActiveDocument.UnitSystem setting
+    "--metric", action="store_true", help="Convert output for US imperial mode, default=document unit system"
 )
 parser.add_argument(
-    # this should probably be True for most shopbot installations
-    "--inches", action="store_true", help="Convert output for US imperial mode, default=metric", default=False
+    # nb, no 'default=' so we can use the App.ActiveDocument.UnitSystem setting
+    "--inches", action="store_true", help="Convert output for imperial decimal mode, default=document unit system"
 )
 parser.add_argument("--axis-modal", action=argparse.BooleanOptionalAction, help="Shorten output when axis-values don't change", default=False)
 parser.add_argument("--modal", action=argparse.BooleanOptionalAction, help="Shorten output when a modal command repeats for no effect", default=False)
+parser.add_argument("--speed-modal", action=argparse.BooleanOptionalAction, help="Shorten output when speed-values don't change", default=False)
 parser.add_argument(
     # this should probably be True for most shopbot installations
     "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
@@ -109,10 +110,9 @@ parser.add_argument("--spindle-controller", action=argparse.BooleanOptionalActio
 parser.add_argument("--wait-for-spindle", type=int, help="How long to wait after a spindle-speed change, only if --spindle-controller. Default=3", default=3)
 parser.add_argument("--gcode-comments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
 
-
+TOOLTIP_ARGS = parser.format_help()
 Arguments = None # updated at export() time with parser.parse_args
 
-TOOLTIP_ARGS = parser.format_help()
 
 ALLOWED_AXIS = ["X", "Y", "Z", "A", "B"]  # also used for --modal optimization
 CurrentState = {}
@@ -129,12 +129,10 @@ GetValue = getMetricValue
 FloatPrecision = None # setup in processArguments
 Filters = [] # setup in processArguments
 Optimizing = {
-    # which things will we optimize
-    'speed' : False, # if True, don't emit speeds if unchanged
+    # placeholder for which things will could optimize
 }
 Units = None
 ExplicitUnits = None
-
 
 def processArguments(argstring):
 
@@ -147,17 +145,43 @@ def processArguments(argstring):
     global Arguments
     global Filters
 
+    # re-init each time
+    Filters = []
+    PRECISION = 3
+    SKIP_UNKNOWN = []
+    GetValue = getMetricValue
+    FloatPrecision = None # setup in processArguments
+    Filters = [] # setup in processArguments
+    Units = None
+    ExplicitUnits = None
+
     Arguments = parser.parse_args(shlex.split(argstring))
 
-    GetValue = getMetricValue
-    Units="metric"
-    ExplicitUnits = False
+    # Use App.ActiveDocument.UnitSystem
+    # I don't know how to decode that string to "inches" vs "mm"
+    # But, FreeCAD.Units.Quantity('1mm').getUserPreferred()
+    #   will give the units for the ACTIVE DOCUMENT
+
+    # .getUserPreferred() e.g. ('0.0010 m', 1000.0, 'm')
+    user_units = FreeCAD.Units.Quantity('1mm').getUserPreferred()[2]
+    if user_units in {'ft','in','thou'}: # FIXME: better way to get 'inches' or 'metric'
+        Units = "inches"
+        GetValue = getImperialValue
+        PRECISION = 4
+    else:
+        # for anything else we'll use mm
+        Units = "metric"
+        GetValue = getMetricValue
+        PRECISION = 3
+
+    ExplicitUnits = False # was argument given
+
     if Arguments.inches:
         GetValue = getImperialValue
         PRECISION = 4
         Units="inches"
         ExplicitUnits = True
-    # nb: as override when --inches
+
     if Arguments.metric:
         GetValue = getMetricValue
         PRECISION = 3
@@ -200,43 +224,57 @@ def set_speeds_before_tool_change(obj):
         return ''
 
     gcode += comment(f"(set speeds: {obj.Label})", True)
-    vs = []
+    speeds = {
+        "ms" : [],
+        "has_ms" : False,
+        "js" : [],
+        "has_js" : False,
+    }
 
-    has_speed = False # skip VS if no speeds
+    has_speed = False # skip initial speed-set if no speeds
 
     if obj.HorizFeed != 0.0:
-        has_speed = True
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizFeed.getValueAs('mm/s')).Value),f".{PRECISION}f"))
+        speeds['has_ms'] = True
+        xy = format( GetValue(FreeCAD.Units.Quantity(obj.HorizFeed.getValueAs('mm/s')).Value),f".{PRECISION}f" )
+        speeds['ms'].append( xy )
+        speeds['ms'].append( xy )
     else:
-        vs.append('')
+        ms.append('')
         gcode += comment("(no HorizFeed)", True)
     if obj.HorizFeed != 0.0:
-        has_speed = True
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertFeed.getValueAs('mm/s')).Value),f".{PRECISION}f"))
+        speeds['has_ms'] = True
+        z = format( GetValue(FreeCAD.Units.Quantity(obj.VertFeed.getValueAs('mm/s')).Value),f".{PRECISION}f" )
+        speeds['ms'].append( z )
     else:
-        vs.append('')
+        speeds['ms'].append('')
         gcode += comment("(no VertFeed)", True)
 
-    # fixme: where to get values?
-    vs.append('') # a-move-speed
-    vs.append('') # b-move-speed
+    # fixme: where to get A&B values?
+    #speeds['ms'].append('') # a-move-speed
+    #speeds['ms'].append('') # b-move-speed
+
+    if speeds['has_ms']:
+        gcode += "MS," + ','.join( speeds['ms'] ) + "\n"
 
     if obj.HorizRapid != 0.0:
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.HorizRapid.getValueAs('mm/s')).Value),f".{PRECISION}f"))
-        has_speed = True
+        speeds['has_js'] = True
+        xy = format( GetValue(FreeCAD.Units.Quantity(obj.HorizRapid.getValueAs('mm/s')).Value),f".{PRECISION}f" )
+        speeds['js'].append( xy )
+        speeds['js'].append( xy )
     else:
         vs.append('')
         gcode += comment("(no HorizRapid)", True)
 
     if obj.VertRapid != 0.0:
-        vs.append( format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),f".{PRECISION}f"))
-        has_speed = True
+        speeds['has_js'] = True
+        z = format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),f".{PRECISION}f" )
+        speeds['js'].append( z )
     else:
         vs.append('')
         gcode += comment("(no VertRapid)", True)
 
-    if has_speed:
-        gcode += f'VS,{ ",".join(vs)}\n'
+    if speeds['has_ms']:
+        gcode += "JS," + ','.join( speeds['js'] ) + "\n"
 
     return gcode
 
@@ -268,22 +306,26 @@ def export(objectslist, filename, argstring):
         "ToolController" : None, # a toolcontroller object from the document
         "Absolute" : True, # G91 puts in relative
         "Operation" : None, # updated in translate_commands() when we start each operation
+        "LastCommand" : None, # updated in translate_commands() 
+        "LastGCode" : None, # updated in translate_commands()
     }
-    Filters = []
     gcode = ""
 
     processArguments(argstring)
-
 
     # need to instantiate filters now that we have the full args
     Filters = [ x(objectslist, filename, argstring) for x in Filters]
 
     # write header
     if Arguments.header:
-        # not using comment(), the option overrides --comments for the header
-        gcode += "'Exported by FreeCAD\n"
-        gcode += "'Post Processor: " + __name__ + "\n"
-        gcode += "'Output Time:" + str(now) + "\n"
+        # not using comment(), the --header option overrides --no-comments
+        gcode += comment( f"Exported by FreeCAD {'.'.join(FreeCAD.Version()[:3])}", True, force=True)
+        gcode += comment(f"Post Processor: {__name__[:-5]}", True, force=True)
+        gcode += comment(f"  {argstring}", True, force=True)
+        # there are "temp" objects that don't give a good ParentJob
+        first_real_object = next((x for x in objectslist if 'Proxy' in dir(x)),None)
+        gcode += comment(f"Job: {PathUtils.findParentJob(first_real_object).Label if first_real_object else ''}", True, force=True)
+        gcode += comment(f"Output Time: {now}", True, force=True)
         for f in Filters:
             gcode += comment(f"Filter: {f.__class__.__name__}", True, force=True)
 
@@ -302,10 +344,13 @@ def export(objectslist, filename, argstring):
 
     # switch machine to our units
     if ExplicitUnits:
-        gcode += comment("(explicit units)", True)
-        gcode += "&WASUNITS=%(25)\n"
-        vd =  { 'inches' : "VD,,0", 'metric' : "VD,,1" }
-        gcode += vd[Units] + "\n"
+        gcode += comment(f"(set to explicit units {Units})", True)
+    else:
+        gcode += comment(f"(use default machine units (document units were {Units}))", True)
+    # save and restore at end
+    gcode += "&WASUNITS=%(25)\n"
+    vd =  { 'inches' : "VD,,,0", 'metric' : "VD,,,1" }
+    gcode += vd[Units] + "\n"
 
     if Arguments.native_preamble:
         comment('(native preamble)',True)
@@ -365,8 +410,7 @@ def export(objectslist, filename, argstring):
         gcode += translate_commands( postamble_commands )
 
     # restore units
-    if ExplicitUnits:
-        gcode += f"VD,,&WASUNITS\n"
+    gcode += f"VD,,,&WASUNITS\n"
 
     if Arguments.native_postamble:
         comment('(native postamble)',True)
@@ -404,10 +448,10 @@ def adjust_speed(command, axis):
     # Handle speed change
     txt = ''
     if "F" in command.Parameters:
-        if normalized(command.Name) == "G01":  # move
-            movetype = "MS"
-        else:  # jog
+        if normalized(command.Name) in RAPID_COMMANDS: # jog
             movetype = "JS"
+        else:  # move
+            movetype = "MS"
 
         speed = command.Parameters["F"]
         zspeed = ""
@@ -415,13 +459,13 @@ def adjust_speed(command, axis):
         if "Z" in axis:
             speed_key = "{}Z".format(movetype)
             speed_val = GetValue(speed)
-            if not Optimizing['speed'] or CurrentState[speed_key] != speed_val:
+            if not Arguments.speed_modal or CurrentState[speed_key] != speed_val:
                 CurrentState[speed_key] = speed_val
                 zspeed = format(speed_val, f".{PRECISION}f")
         if ("X" in axis) or ("Y" in axis):
             speed_key = f"{movetype}XY"
             speed_val = GetValue(speed)
-            if not Optimizing['speed'] or CurrentState[speed_key] != speed_val:
+            if not Arguments.speed_modal or CurrentState[speed_key] != speed_val:
                 CurrentState[speed_key] = speed_val
                 xyspeed = format(speed_val, f".{PRECISION}f")
 
@@ -458,6 +502,19 @@ def axis_list(command):
             else:
                 axis += p
     return axis
+
+def pause(command):
+    # Prompt with "Continue?" and pause, wait for user-interaction
+    # If a comment precedes M00, that is used as the prompt (to emulate opensbp behavior)
+
+    txt = ''
+    if CurrentState['LastCommand'] != 'comment':
+        txt += comment("Continue?", True, force=True)
+    elif CurrentState['LastCommand'] == 'comment' and not Arguments.comments:
+        # Force inclusion of that comment as a prompt
+        txt += comment( CurrentState['LastGCode'], force=True )
+    txt += "PAUSE\n"
+    return txt
 
 def move(command):
     txt = ""
@@ -533,7 +590,10 @@ def arc(command):
     #   F is required
 
     # we would have to generate multiple CG's for repetitions (P)
-    not_handled_parameters = [ 'P', 'R', 'K' ]
+    not_handled_parameters = [ 'P', 'R' ]
+    # we handle K=0.0 by ignoring it (xy-plane), other K's we don't handle
+    if 'K' in command.Parameters and command.Parameters['K'] != 0.0:
+        not_handled_parameters.append('K')
     not_handled = [ a for a in command.Parameters if a in not_handled_parameters ]
     if not_handled:
         opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
@@ -593,9 +653,10 @@ def arc(command):
     txt += "," # proportion-y
     if 'Z' in command.Parameters:
         # helical cases
+        # we don't do "bottom pass" (4) because FreeCAD seems to do that and it's not a g-code thing anyway
         if 'X' not in command.Parameters and 'Y' not in command.Parameters:
             # circle
-            feature = 4 # spiral w/bottom pass
+            feature = 3 # spiral
         else:
             feature = 3 # spiral
     else:
@@ -605,9 +666,10 @@ def arc(command):
     txt += "1," # continue the CG plunging (don't pull up)
     txt += "0" # no move before plunge
 
-    # actual Z, opensbp plunge is a delta
+    # actual Z, opensbp plunge is a delta, note the actual Z as a comment
     if 'Z' in command.Parameters:
         txt += " ' Z" + format(GetValue(command.Parameters["Z"]), f".{PRECISION}f")
+    txt += gcodecomment(command)
     txt += "\n"
     return txt
 
@@ -716,9 +778,10 @@ def coordinate_system(command):
 
 
 # Supported Commands
-scommands = {
+SUPPORTED_COMMANDS = {
     # single digit Gn's are normalized to G00 before a fn sees them
-    "G00": { "fn" : move },
+    # "rapid" is used to change jog-speed (otherwise it's move-speed)
+    "G00": { "fn" : move, "rapid" : True },
     "G01": { "fn" : move },
     "G02": { "fn" : arc },
     "G03": { "fn" : arc },
@@ -727,9 +790,11 @@ scommands = {
     "G91" : { "fn" : relative_positions },
     "G90" : { "fn" : absolute_positions },
     "G54" : { "fn" : coordinate_system },
+    "M00" : { "fn" : pause },
 
     "comment": { "fn" : comment },
 }
+RAPID_COMMANDS = { k for k,info in SUPPORTED_COMMANDS.items() if info.get("rapid",False) }
 
 def filter_gcode(pathobj, path_commands):
     # an iterable of Path.Commands
@@ -771,7 +836,6 @@ def normalized(gcode_name):
 
 def translate_commands(commands):
     output = ""
-    last_gcode = ''
     for c in commands:
         CurrentState['gcode_line_number'] += 1 # i.e. from Freecad gcode
 
@@ -780,9 +844,9 @@ def translate_commands(commands):
         else:
             command = normalized(c.Name)
 
-        if command in scommands:
+        if command in SUPPORTED_COMMANDS:
             # skip duplicate commands
-            if Arguments.modal and c.toGCode() == last_gcode:
+            if Arguments.modal and c.toGCode() == CurrentState['LastGCode']:
                 # Don't elide movements if relative motion, it isn't a noop!
                 if set(ALLOWED_AXIS) & set( c.Parameters.keys() ):
                     if CurrentState['Absolute']:
@@ -790,9 +854,7 @@ def translate_commands(commands):
                 # non-movements don't care about relative
                 else:
                     continue
-            last_gcode = c.toGCode()
-
-            output += scommands[command]['fn'](c)
+            output += SUPPORTED_COMMANDS[command]['fn'](c)
 
             # Track axis positions
             # other current-state must be handled in each command translator (e.g. JSXY)
@@ -813,6 +875,8 @@ def translate_commands(commands):
                 output += comment(message, True, force=True)
                 FreeCAD.Console.PrintWarning("Skipped: " + message + "\n")
 
+        CurrentState['LastGCode'] = c.toGCode()
+        CurrentState['LastCommand'] = command # not quite the same as c.Command (e.g. "comment")
     return output
 
 # print(__name__ + " gcode postprocessor loaded.")
