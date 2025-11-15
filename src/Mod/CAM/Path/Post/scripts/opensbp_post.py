@@ -2,6 +2,7 @@
 
 # ***************************************************************************
 # *   Copyright (c) 2014 sliptonic <shopinthewoods@gmail.com>               *
+# *   Copyright (c) 2025 Alan Grover <awgrover@gmail.com>               *
 # *                                                                         *
 # *   This file is part of the FreeCAD CAx development system.              *
 # *                                                                         *
@@ -41,8 +42,9 @@ For ShopBot (or other opensbp controllers), this is a CAM postprocessor. We have
 translate gcode to opensbp, so the output is NOT gcode.
 
 Special behaviors:
-* This always sets the ShopBot machine units (see --inches --metric), no more mismatches. This defaults to your document's units.
+* This always sets the ShopBot app/machine units (see --inches --metric), no more mismatches. This defaults to your document's units.
 * G54 (fixture/coordinate-system) is accepted, but is a noop (because it's the default in Operations). Others (G55 etc) are not-accepted.
+* This does arc gcodes (G02 and G03), so helical operations should work.
 * Like most post-processors, we accept single-digit gcodes like G1, and treat them as if they were canonical 2 digit, like G01.
 * By default, this post-processor fails if it sees a gcode it doesn't understand. Cf. --abort-on-unknown and --skip-unknown
 * opensbp prompt (dialog-box) behavior like this:
@@ -55,7 +57,6 @@ Special behaviors:
 * This generates a dialog-box for manual Tool changes (if it is a change), but not for the first tool (this assumes you've chucked the first tool).
 * There is only very basic support for the A and B axis. This will probably do the wrong thing if not absolute degrees.
 * Drill gcodes are not accepted (yet).
-* This does arc gcodes (G02 and G03), so helical operations should work.
 """
 """
 ToDo
@@ -79,7 +80,7 @@ parser.add_argument(
     default=True
 )
 # no default so that --inches/--metric can set the default for that mode
-parser.add_argument("--precision", help=f"number of digits of precision, default=3 for metric, 4 for inches")
+parser.add_argument("--precision", help="number of digits of precision, default=3 for metric, 4 for inches")
 parser.add_argument(
     "--native-preamble",
     help='verbatim opensbp commands to be issued before the first command, multi-line w/ \\n. Before preamble. Consider a "Cn" or "FB". default=None',
@@ -244,15 +245,13 @@ def set_speeds_before_tool_change(obj):
         "has_js" : False,
     }
 
-    has_speed = False # skip initial speed-set if no speeds
-
     if obj.HorizFeed != 0.0:
         speeds['has_ms'] = True
         xy = format( GetValue(FreeCAD.Units.Quantity(obj.HorizFeed.getValueAs('mm/s')).Value),f".{PRECISION}f" )
         speeds['ms'].append( xy )
         speeds['ms'].append( xy )
     else:
-        ms.append('')
+        speeds['ms'].append('')
         gcode += comment("(no HorizFeed)", True)
     if obj.HorizFeed != 0.0:
         speeds['has_ms'] = True
@@ -275,7 +274,7 @@ def set_speeds_before_tool_change(obj):
         speeds['js'].append( xy )
         speeds['js'].append( xy )
     else:
-        vs.append('')
+        speeds['vs'].append('')
         gcode += comment("(no HorizRapid)", True)
 
     if obj.VertRapid != 0.0:
@@ -283,7 +282,7 @@ def set_speeds_before_tool_change(obj):
         z = format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),f".{PRECISION}f" )
         speeds['js'].append( z )
     else:
-        vs.append('')
+        speeds['vs'].append('')
         gcode += comment("(no VertRapid)", True)
 
     if speeds['has_ms']:
@@ -319,7 +318,7 @@ def export(objectslist, filename, argstring):
         "ToolController" : None, # a toolcontroller object from the document
         "Absolute" : True, # G91 puts in relative
         "Operation" : None, # updated in translate_commands() when we start each operation
-        "LastCommand" : None, # updated in translate_commands() 
+        "LastCommand" : None, # updated in translate_commands()
         "LastGCode" : None, # updated in translate_commands()
     }
     gcode = ""
@@ -423,7 +422,7 @@ def export(objectslist, filename, argstring):
         gcode += translate_commands( postamble_commands )
 
     # restore units
-    gcode += f"VD,,,&WASUNITS\n"
+    gcode += "VD,,,&WASUNITS\n"
 
     if Arguments.native_postamble:
         comment('(native postamble)',True)
@@ -435,8 +434,7 @@ def export(objectslist, filename, argstring):
     if Arguments.show_editor:
         dia = PostUtils.GCodeEditorDialog()
         dia.editor.setText(gcode)
-        result = dia.exec_()
-        if result:
+        if dia.exec_():
             final = dia.editor.toPlainText()
         else:
             final = gcode
@@ -584,7 +582,7 @@ def move(command):
     if len(txt) != txt_len_before_move:
         txt += gcodecomment(command)
         txt += "\n"
-    
+
     return txt
 
 def arc(command):
@@ -614,7 +612,7 @@ def arc(command):
             raise NotImplementedError(message)
         else:
             return ''
-    
+
     if not CurrentState['Absolute']:
         opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
         message = f"We can't do relative mode for arcs in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
@@ -732,7 +730,6 @@ def comment(command, keepparens=False, force=False):
 def absolute_positions(command):
     CurrentState['Absolute'] = True
     return comment("Absolute Positions", True) + "SA 'ABSOLUTE\n"
-
 
 def relative_positions(command):
     CurrentState['Absolute'] = False
@@ -865,7 +862,7 @@ def translate_commands(commands, modal=None):
                 # non-movements don't care about relative
                 else:
                     continue
-            
+
             modal_overrides = ['modal','axis_modal','speed_modal']
             was_model_override_values = {}
             if modal is not None:
