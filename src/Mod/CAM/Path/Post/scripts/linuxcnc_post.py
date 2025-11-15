@@ -346,7 +346,6 @@ def parse(pathobj):
         # for c in PathUtils.getPathWithPlacement(pathobj).Commands:
         for c in pathobj.Path.Commands:
 
-            print(f"### params {c.Parameters}")
             outstring = []
             command = c.Name
             outstring.append(command)
