@@ -814,3 +814,41 @@ PAUSE
 VD,,,&WASUNITS
 """
         )
+
+    def test270(self): 
+        """Test drilling"""
+        self.maxDiff = 1024*1024
+
+        # We'll trust the other variations (gcode generation tested in TestRefactoredTestPostGCodes.py)
+        self.multi_compare( 
+            "G73 X1 Y2 Z0 R5 Q1.5 F123",
+            "--no-header --comments --no-show-editor",
+            """'(use default machine units (document units were metric))
+&WASUNITS=%(25)
+VD,,,1
+'(begin operation: testpath)
+'(Path: testpath)
+'translate drill [1] G73 F123.000000 Q1.500000 R5.000000 X1.000000 Y2.000000 Z0.000000
+JZ,5.000
+J2,1.000,2.000
+MS,,123.000
+MZ,3.500
+JZ,3.750
+JZ,3.575
+MS,,123.000
+MZ,2.000
+JZ,2.250
+JZ,2.075
+MS,,123.000
+MZ,0.500
+JZ,0.750
+JZ,0.575
+MS,,123.000
+MZ,0.000
+JZ,5.000
+'end translate drill [1] G73
+'(finish operation: testpath)
+VD,,,&WASUNITS
+""",
+        )
+
