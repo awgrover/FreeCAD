@@ -35,7 +35,8 @@ import FreeCAD
 import Path
 import Path.Post.Utils as PostUtils
 from PathScripts import PathUtils
-
+from Path.Post.UtilsParse import drill_translate
+from Path.Post.UtilsArguments import init_shared_values
 
 TOOLTIP = """
 For ShopBot (or other opensbp controllers), this is a CAM postprocessor. We have to
@@ -320,6 +321,8 @@ def export(objectslist, filename, argstring):
         "Operation" : None, # updated in translate_commands() when we start each operation
         "LastCommand" : None, # updated in translate_commands()
         "LastGCode" : None, # updated in translate_commands()
+        "DrillRetract" : "G98",
+
     }
     gcode = ""
 
@@ -682,6 +685,49 @@ def arc(command):
     txt += "\n"
     return txt
 
+def drill(command):
+    """always "uncan" via translate_drill
+    """
+
+    # we only need some of these for drill_translate
+    values = {}
+    init_shared_values(values)
+    values['OUTPUT_LINE_NUMBERS'] = False
+    values['OUTPUT_COMMENTS'] = Arguments.comments
+    values["OUTPUT_PATH_LABELS"] = Arguments.comments
+    values['LINE_INCREMENT'] = 1
+    values['line_number'] = CurrentState['gcode_line_number']
+    values['UNIT_FORMAT'] = {'inches':'in','metric':'mm'}[Units] # mm/in
+    values['UNIT_SPEED_FORMAT' ] = values['UNIT_FORMAT'] + "/s"
+    values["AXIS_PRECISION"] = PRECISION
+    values["FEED_PRECISION"] = PRECISION
+    values["MODAL"] = Arguments.modal
+    values["MOTION_MODE"] = "G90" if CurrentState['Absolute'] else "G91"
+
+    generated_gcode = []
+    generated_gcode.append( f"(translate drill [{CurrentState['gcode_line_number']}] {command.toGCode()})\n" )
+    command_line = []
+    motion_location = {a:v for a,v in CurrentState.items() if a in 'XYZABC'}
+    drill_retract = CurrentState['DrillRetract']
+    print(f"### drill_retract {CurrentState['DrillRetract']}")
+    drill_translate(values,  generated_gcode, command.Name, command.Parameters, motion_location, drill_retract )
+    #print(f"###---gcode\n{'<'.join(generated_gcode)}---")
+    generated_gcode.append( f"(end translate drill [{CurrentState['gcode_line_number']}] {command.Name})\n" )
+
+    # Now translate to opensbp
+    path_objects = [ Path.Command(x.rstrip()) for x in generated_gcode ]
+    output = translate_commands( filter_gcode(None, path_objects ))
+
+    return output
+
+def drill_retract(command):
+    CurrentState['DrillRetract'] = command.Name
+    return ''
+
+def end_drill(command):
+    # fixme: noop? some postprocessors retract to at least safe?
+    return ''
+
 def tool_change(command):
     txt = ""
     txt += comment("(tool change)", True)
@@ -791,6 +837,14 @@ SUPPORTED_COMMANDS = {
     "G01": { "fn" : move },
     "G02": { "fn" : arc },
     "G03": { "fn" : arc },
+    "G73": { "fn" : drill }, 
+    "G81": { "fn" : drill },
+    "G82": { "fn" : drill },
+    "G83": { "fn" : drill },
+    "G85": { "fn" : drill },
+    "G98" : { "fn" : drill_retract },
+    "G99" : { "fn" : drill_retract },
+    "G80" : { "fn" : end_drill },
     "M06": { "fn" : tool_change },
     "M03": { "fn" : spindle },
     "G91" : { "fn" : relative_positions },
@@ -818,8 +872,8 @@ def parse(pathobj):
         output += comment(f"(compound: {pathobj.Label})", True)
         for p in pathobj.Group:
             output += parse(p)
-    else:  # parsing simple path
 
+    else:  # parsing simple path
         # groups might contain non-path things like stock.
         if not hasattr(pathobj, "Path"):
             return output
