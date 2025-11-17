@@ -275,7 +275,7 @@ def set_speeds_before_tool_change(obj):
         speeds['js'].append( xy )
         speeds['js'].append( xy )
     else:
-        speeds['vs'].append('')
+        speeds['js'].append('')
         gcode += comment("(no HorizRapid)", True)
 
     if obj.VertRapid != 0.0:
@@ -283,7 +283,7 @@ def set_speeds_before_tool_change(obj):
         z = format( GetValue(FreeCAD.Units.Quantity(obj.VertRapid.getValueAs('mm/s')).Value),f".{PRECISION}f" )
         speeds['js'].append( z )
     else:
-        speeds['vs'].append('')
+        speeds['js'].append('')
         gcode += comment("(no VertRapid)", True)
 
     if speeds['has_ms']:
