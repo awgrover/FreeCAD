@@ -123,32 +123,7 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         if FreeCAD.ActiveDocument and FreeCAD.ActiveDocument.findObjects(Name="testpath"):
             FreeCAD.ActiveDocument.removeObject("testpath")
 
-    def compare_first_command(self, path_string, expected, args, debug=False):
-        """Perform a test with a single comparison to the first (command) line of the output."""
-
-        self.job.PostProcessorArgs = args
-
-        nl = "\n"
-        if path_string:
-            self.profile_op.Path = Path.Path([Path.Command(path_string)])
-        else:
-            self.profile_op.Path = Path.Path([])
-
-        gcode = self.post.export()
-        if rez is None:
-            raise Exception("Error processing arguments")
-
-        if debug:
-            print(f"--------{nl}{gcode}--------{nl}")
-
-        if expected is None:
-            self.assertEqual(gcode, "")
-        else:
-            lines = gcode.splitlines()
-            first = next( (x for x in lines if not (re.match(r"['&]", x) or x.startswith('VD,')) ), '<no command line>' )
-            self.assertEqual(first, expected)
-
-    def multi_compare(self, *args, remove=None, debug=False ):
+    def compare_multi(self, *args, remove=None, debug=False ):
         """Actually as if: ( *gcode, options, expected, debug=True )
         `*gcode` is all str (gcodes), or None to use extant self.job
         `remove` is a pattern to remove lines from both expected and generated
@@ -159,8 +134,8 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         post_args = args[-2]
         expected = args[-1]
 
-        print(f"###test multi path str {args[:-2]}")
-        print(f"###test in gcode {[p.toGCode() for p in self.profile_op.Path.Commands]}")
+        #print(f"###test multi path str {args[:-2]}")
+        #print(f"###test in gcode {[p.toGCode() for p in self.profile_op.Path.Commands]}")
         self.job.PostProcessorArgs = post_args
 
         rez = self.post.export()
@@ -168,7 +143,7 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
             raise Exception("Error processing arguments")
         else:
             dumy, gcode = rez[0]
-        print(f"### gcode {gcode}")
+        #print(f"### gcode {gcode}")
 
         if debug:
             nl="\n"
@@ -189,7 +164,7 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
 
         # Test generating with header
         # Header contains a time stamp that messes up unit testing.
-        self.multi_compare( None,
+        self.compare_multi( None,
             "--no-show-editor",
             """'(Exported by FreeCAD)
 '(Post Processor: refactored_opensbp_post)
@@ -233,7 +208,7 @@ VD,,,&WASUNITS
 
         # Test without header
 
-        self.multi_compare( None,
+        self.compare_multi( None,
             "--no-header --no-comments --no-show-editor",
             """SA
 &WASUNITS=%(25)
@@ -248,6 +223,21 @@ VD,,,&WASUNITS
 """
         )
 
+    def wrap(self, expected):
+        # wraps in std prefix, postfix
+        return f"""SA
+&WASUNITS=%(25)
+VD,,,1
+&Tool=1
+'Change tool to #1: TC: Default Tool, Endmill
+PAUSE
+&ToolName="TC Default Tool Endmill"
+MS,700.000,700.000,350.000
+JS,2100.000,2100.000,1050.000
+{expected.rstrip()}
+VD,,,&WASUNITS
+"""
+
     def test010(self):
         """Test command Generation.
         Test Precision
@@ -255,30 +245,34 @@ VD,,,&WASUNITS
         """
 
         # default is metric-mm (internal default)
-        self.compare_first_command(
-            "G0 X10 Y20 Z30", # simple move
-            "J3,10.000,20.000,30.000",
-            "--no-header --no-show-editor"
+        self.compare_multi(
+            "G0 X10 Y20 Z30", # simple rapid
+            "--no-header --no-comments --no-show-editor --metric --no-abort-on-unknown",
+            self.wrap("""JS,561.249,1122.497,0.000,0.000 FIXME XY is together, z separate
+J3,10.000,20.000,30.000
+"""),
         )
 
-        self.compare_first_command(
+        self.compare_multi(
             "G0 X10 Y20 Z30",
-            "J3,10.00,20.00,30.00",
-            "--no-header --precision=2 --no-show-editor",
+            "--no-header --no-comments --precision=2 --no-show-editor",
+            self.wrap("""JS,561.25,1122.50,841.87,0.00,0.00
+J3,10.00,20.00,30.00
+"""),
         )
 
-        self.multi_compare(
+        self.compare_multi(
             "G0 X10 Y20 Z30",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,0
 J3,0.3937,0.7874,1.1811
 VD,,,&WASUNITS
 """,
         )
-        self.multi_compare(
+        self.compare_multi(
             "G0 X10 Y20 Z30",
-            "--no-header --inches --precision=2 --no-show-editor",
+            "--no-header --no-comments --inches --precision=2 --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,0
 J3,0.39,0.79,1.18
@@ -287,9 +281,9 @@ VD,,,&WASUNITS
         )
 
         # override as --metric
-        self.multi_compare(
+        self.compare_multi(
             "G0 X10 Y20 Z30",
-            "--no-header --metric --precision=3 --no-show-editor",
+            "--no-header --no-comments --metric --precision=3 --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,10.000,20.000,30.000
@@ -311,7 +305,7 @@ JZ,50.000
 MX,20.000
 VD,,,&WASUNITS
 """
-        args = "--no-header --preamble='G0 Z50\nG1 X20' --no-show-editor"
+        args = "--no-header --no-comments --preamble='G0 Z50\nG1 X20' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
         self.assertEqual(gcode, expected)
 
@@ -328,7 +322,7 @@ JZ,55.000
 MX,22.000
 VD,,,&WASUNITS
 """
-        args = "--no-header --postamble='G0 Z55\nG1 X22' --no-show-editor"
+        args = "--no-header --no-comments --postamble='G0 Z55\nG1 X22' --no-show-editor"
         gcode = postprocessor.export(postables, "-", args)
         self.assertEqual(gcode, expected)
 
@@ -338,18 +332,18 @@ VD,,,&WASUNITS
         """
 
         # inches
-        self.multi_compare(
+        self.compare_multi(
             "G0 X10 Y20 Z30", # simple move
-            "--no-header --no-show-editor --inches",
+            "--no-header --no-comments --no-show-editor --inches",
             """&WASUNITS=%(25)
 VD,,,0
 J3,0.3937,0.7874,1.1811
 VD,,,&WASUNITS
 """
         )
-        self.multi_compare(
+        self.compare_multi(
             "G0 X10 Y20 Z30", # simple move
-            "--no-header --no-show-editor --inches --precision 2",
+            "--no-header --no-comments --no-show-editor --inches --precision 2",
             """&WASUNITS=%(25)
 VD,,,0
 J3,0.39,0.79,1.18
@@ -364,8 +358,8 @@ VD,,,&WASUNITS
         """
         c = "G0 X10 Y20 Z30"
 
-        self.multi_compare( c, c,
-            "--no-header --no-show-editor",
+        self.compare_multi( c, c,
+            "--no-header --no-comments --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,10.000,20.000,30.000
@@ -373,8 +367,8 @@ J3,10.000,20.000,30.000
 VD,,,&WASUNITS
 """
         )
-        self.multi_compare( c, c,
-            "--no-header --modal --no-show-editor",
+        self.compare_multi( c, c,
+            "--no-header --no-comments --modal --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,10.000,20.000,30.000
@@ -389,8 +383,8 @@ VD,,,&WASUNITS
 
         # w/o axis-modal
         c="G0 X10 Y20 Z30"
-        self.multi_compare( c, "G0 X10 Y30 Z30",
-            "--no-header --no-show-editor",
+        self.compare_multi( c, "G0 X10 Y30 Z30",
+            "--no-header --no-comments --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,10.000,20.000,30.000
@@ -400,13 +394,13 @@ VD,,,&WASUNITS
         )
 
         # diff y
-        self.multi_compare( 
+        self.compare_multi( 
             c, 
             # absolute xy same
             "G0 X10 Y30 Z30", 
             # relative, xy same
             "G91", "G0 X0 Y31 Z0",
-            "--no-header --axis-modal --no-show-editor",
+            "--no-header --no-comments --axis-modal --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,10.000,20.000,30.000
@@ -418,8 +412,8 @@ VD,,,&WASUNITS
         )
 
         # diff z
-        self.multi_compare( c, "G0 X10 Y20 Z40",
-            "--no-header --axis-modal --no-show-editor",
+        self.compare_multi( c, "G0 X10 Y20 Z40",
+            "--no-header --no-comments --axis-modal --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,10.000,20.000,30.000
@@ -435,8 +429,8 @@ VD,,,&WASUNITS
 
         # both tool and spindle: manual
         gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
-        self.multi_compare( *gcode_in,
-            "--no-header --comments --no-show-editor",
+        self.compare_multi( *gcode_in,
+            "--no-header --no-comments --comments --no-show-editor",
             """'(use default machine units (document units were metric))
 &WASUNITS=%(25)
 VD,,,1
@@ -460,8 +454,8 @@ VD,,,&WASUNITS
         )
 
         # both tool and spindle: auto
-        self.multi_compare( *gcode_in,
-            "--toolchanger --spindle-controller --no-header --no-show-editor",
+        self.compare_multi( *gcode_in,
+            "--toolchanger --no-comments --spindle-controller --no-header --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 &Tool=2
@@ -477,8 +471,8 @@ VD,,,&WASUNITS
 """
         )
         # auto-spindle with wait
-        self.multi_compare( *gcode_in,
-            "--toolchanger --spindle-controller --wait-for-spindle 2 --no-header --no-show-editor",
+        self.compare_multi( *gcode_in,
+            "--toolchanger --no-comments --spindle-controller --wait-for-spindle 2 --no-header --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 &Tool=2
@@ -501,16 +495,16 @@ VD,,,&WASUNITS
         """
 
         # we've always been no-comments default
-        self.multi_compare( "(comment)",
-            "--no-header --no-show-editor",
+        self.compare_multi( "(comment)",
+            "--no-header --no-comments --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 VD,,,&WASUNITS
 """
         )
 
-        self.multi_compare( "(comment)",
-            "--no-header --comments --no-show-editor",
+        self.compare_multi( "(comment)",
+            "--no-header --no-comments --comments --no-show-editor",
             """'(use default machine units (document units were metric))
 &WASUNITS=%(25)
 VD,,,1
@@ -522,8 +516,8 @@ VD,,,&WASUNITS
 """
         )
 
-        self.multi_compare( "(comment)",
-            "--no-header --no-comments --no-show-editor",
+        self.compare_multi( "(comment)",
+            "--no-header --no-comments --no-comments --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 VD,,,&WASUNITS
@@ -532,14 +526,14 @@ VD,,,&WASUNITS
 
     def test100(self):
         """Test A, B axis output for values between 0 and 90 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A40 B50",
-            "M5,10.000,20.000,30.000,40.000,50.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,40.000,50.000"),
         )
-        self.multi_compare(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A40 B50",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,0
 M5,0.3937,0.7874,1.1811,40.0000,50.0000
@@ -552,9 +546,9 @@ VD,,,&WASUNITS
 
         # only noticeable for --inches
 
-        self.multi_compare(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A40 B50",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,0
 M5,0.3937,0.7874,1.1811,40.0000,50.0000
@@ -562,9 +556,9 @@ VD,,,&WASUNITS
 """
         )
 
-        self.multi_compare(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A40 B50",
-            "--no-header --no-show-editor --inches --ab-is-distance",
+            "--no-header --no-comments --no-show-editor --inches --ab-is-distance",
             """&WASUNITS=%(25)
 VD,,,0
 M5,0.3937,0.7874,1.1811,1.5748,1.9685
@@ -574,14 +568,14 @@ VD,,,&WASUNITS
 
     def test110(self):
         """Test A, B, & C axis output for 89 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A89 B89",
-            "M5,10.000,20.000,30.000,89.000,89.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,89.000,89.000"),
         )
-        self.multi_compare(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A89 B89",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,0
 M5,0.3937,0.7874,1.1811,89.0000,89.0000
@@ -601,84 +595,84 @@ VD,,,&WASUNITS
         # parses the gcode to {'A': 0.0, 'B': 90.0, 'X': 10.0, 'Y': 20.0, 'Z': 30.0}
         # Note the A==0
 
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A90 B90",
-            "M5,10.000,20.000,30.000,90.000,90.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,90.000,90.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A90 B90",
-            "M5,0.3937,0.7874,1.1811,90.0000,90.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,90.0000,90.0000"),
         )
 
     @unittest.expectedFailure
     def test130(self):
         """Test A, B, & C axis output for 91 degrees"""
 
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A91 B91",
-            "M5,10.000,20.000,30.000,91.000,91.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,91.000,91.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A91 B91",
-            "M5,0.3937,0.7874,1.1811,91.0000,91.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,91.0000,91.0000"),
         )
 
     @unittest.expectedFailure
     def test140(self):
         """Test A, B, & C axis output for values between 90 and 180 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A100 B110",
-            "M5,10.000,20.000,30.000,100.000,110.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,100.000,110.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A100 B110",
-            "M5,0.3937,0.7874,1.1811,100.0000,110.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,100.0000,110.0000"),
         )
 
     @unittest.expectedFailure
     def test150(self):
         """Test A, B, & C axis output for values between 180 and 360 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A240 B250",
-            "M5,10.000,20.000,30.000,240.000,250.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,240.000,250.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A240 B250",
-            "M5,0.3937,0.7874,1.1811,240.0000,250.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,240.0000,250.0000"),
         )
 
     @unittest.expectedFailure
     def test160(self):
         """Test A, B, & C axis output for values greater than 360 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A440 B450",
-            "M5,10.000,20.000,30.000,440.000,450.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,440.000,450.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A440 B450",
-            "M5,0.3937,0.7874,1.1811,440.0000,450.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,440.0000,450.0000"),
         )
 
     def test170(self):
         """Test A, B, & C axis output for values between 0 and -90 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-40 B-50",
-            "M5,10.000,20.000,30.000,-40.000,-50.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,-40.000,-50.000"),
         )
-        self.multi_compare(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-40 B-50",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,0
 M5,0.3937,0.7874,1.1811,-40.0000,-50.0000
@@ -689,51 +683,51 @@ VD,,,&WASUNITS
     @unittest.expectedFailure
     def test180(self):
         """Test A, B, & C axis output for values between -90 and -180 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-100 B-110",
-            "M5,10.000,20.000,30.000,-100.000,-110.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,-100.000,-110.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-100 B-110",
-            "M5,0.3937,0.7874,1.1811,-100.0000,-110.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,-100.0000,-110.0000"),
         )
 
     @unittest.expectedFailure
     def test190(self):
         """Test A, B, & C axis output for values between -180 and -360 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-240 B-250",
-            "M5,10.000,20.000,30.000,-240.000,-250.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,-240.000,-250.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-240 B-250",
-            "M5,0.3937,0.7874,1.1811,-240.0000,-250.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,-240.0000,-250.0000"),
         )
 
     @unittest.expectedFailure
     def test200(self):
         """Test A, B, & C axis output for values below -360 degrees"""
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-440 B-450",
-            "M5,10.000,20.000,30.000,-440.000,-450.000",
-            "--no-header --no-show-editor",
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("M5,10.000,20.000,30.000,-440.000,-450.000"),
         )
-        self.compare_first_command(
+        self.compare_multi(
             "G1 X10 Y20 Z30 A-440 B-450",
-            "M5,0.3937,0.7874,1.1811,-440.0000,-450.0000",
-            "--no-header --inches --no-show-editor",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("M5,0.3937,0.7874,1.1811,-440.0000,-450.0000"),
         )
 
     def test210(self):
         """Test return-to"""
 
         # return-to is before postamble
-        self.multi_compare("",
-            "--postamble 'G0 X1 Y2 Z3' --return-to='12,34,56' --no-header --no-show-editor",
+        self.compare_multi("",
+            "--no-comments --postamble 'G0 X1 Y2 Z3' --return-to='12,34,56' --no-header --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,12.000,34.000,56.000
@@ -743,8 +737,8 @@ VD,,,&WASUNITS
         )
 
         # allow empty ,
-        self.multi_compare("",
-            "--postamble 'G0 X1 Y2 Z3' --return-to=',34,56' --no-header --no-show-editor",
+        self.compare_multi("",
+            "--no-comments --postamble 'G0 X1 Y2 Z3' --return-to=',34,56' --no-header --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 J3,34.000,56.000
@@ -757,8 +751,8 @@ VD,,,&WASUNITS
         """Test native-pre/postamble"""
 
         # return-to is before postamble
-        self.multi_compare("",
-            "--postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim-post' --native-preamble 'verbatim-pre' --no-header --no-show-editor",
+        self.compare_multi("",
+            "--no-comments --postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim-post' --native-preamble 'verbatim-pre' --no-header --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 verbatim-pre
@@ -773,8 +767,8 @@ verbatim-post
 
         c = "G0 X10 Y20 Z30"
 
-        self.multi_compare( "G91", c, c, "G90", c, c,
-            "--no-header --modal --no-show-editor",
+        self.compare_multi( "G91", c, c, "G90", c, c,
+            "--no-header --no-comments --modal --no-show-editor",
             """&WASUNITS=%(25)
 VD,,,1
 SR 'RELATIVE
@@ -791,7 +785,7 @@ VD,,,&WASUNITS
 
         c = "G0 X10 Y20 Z30"
 
-        self.multi_compare( "G54",
+        self.compare_multi( "G54",
             "--no-header --comments --no-show-editor",
             """'(use default machine units (document units were metric))
 &WASUNITS=%(25)
@@ -809,7 +803,7 @@ VD,,,&WASUNITS
  
         c = "G2 X10 Y20 Z40 I1 J2 F99"
 
-        self.multi_compare( 
+        self.compare_multi( 
             "G0 Z5", # the CG plunge is relative, so start from non-0 to test
             "G2 X10 Y20 Z40 I1 J2 F99", # helical segment
             "G0 Z5",
@@ -835,7 +829,7 @@ VD,,,&WASUNITS
     def test270(self):
         """Test M00 w/prompt (pause)"""
  
-        self.multi_compare( 
+        self.compare_multi( 
             "(With Prompt)", "M0",
             "--no-header --comments --no-show-editor",
             """'(use default machine units (document units were metric))
@@ -850,7 +844,7 @@ VD,,,&WASUNITS
 """
         )
 
-        self.multi_compare( 
+        self.compare_multi( 
             # Include the preceding comment even if no-comments
             "(With Prompt)", "M0",
             "--no-header --no-comments --no-show-editor",
@@ -862,7 +856,7 @@ VD,,,&WASUNITS
 """
         )
 
-        self.multi_compare( 
+        self.compare_multi( 
             "(Doesn't count as prompt)","G0 X0", "M0", # no prompt
             "--no-header --comments --no-show-editor",
             """'(use default machine units (document units were metric))
@@ -884,7 +878,7 @@ VD,,,&WASUNITS
         self.maxDiff = 1024*1024
 
         # We'll trust the other variations (gcode generation tested in TestRefactoredTestPostGCodes.py)
-        self.multi_compare( 
+        self.compare_multi( 
             "G73 X1 Y2 Z0 R5 Q1.5 F123",
             "--no-header --comments --no-show-editor",
             """'(use default machine units (document units were metric))

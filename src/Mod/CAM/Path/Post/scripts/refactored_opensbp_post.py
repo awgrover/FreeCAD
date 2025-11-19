@@ -27,6 +27,8 @@ import sys
 import re
 import argparse
 from copy import copy
+import operator
+import math
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -299,6 +301,8 @@ class Refactored_Opensbp(PostProcessor):
                 'OUTPUT_COMMENTS' : True, # we use this to detect operation and...
                 'OUTPUT_TOOL_CHANGE' : True, # we need this to ensure speeds
                 'SHOW_MACHINE_UNITS' : True, # we have to set the machine
+                'AXIS_PRECISION' : 5, # we do calculations, so more precision to prevent rounding errors
+                'FEED_PRECISION' : 5,
             })
             try:
                 # We get back a processed (expanded) set of gcode
@@ -370,7 +374,7 @@ def gcode(*commands):
     """Only for use in class ToOpenSBP.
     Decorator to add the function to the translate-map.
         `commands` is list of Gcodes, i.e. "G54", "G55",
-        specifying a single digit gcode, e.g. "G1", implies the 2-digit as well, e.g. "G01"
+        specify two digit gcode: e.g. "G01", "M06"
     """
     def gcode(func):
         # we really just want to make a map with it
@@ -383,7 +387,7 @@ def gcode(*commands):
             func._gcode.append( c )
             canonical = re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', c)
             if canonical != c:
-                func._gcode.append( canonical )
+                raise Exception(f"Internal: Must be a 2 digit gcode (e.g. G00): @gcode('{c}')")
 
         # null wrapper
         # FIXME: I think if we wrap it, then do obj.func(args), we'll get proper inhertance dispatch
@@ -403,6 +407,8 @@ class ToOpenSBP:
     """Translate gcode to opensbp
     """
 
+    AllowedAxis = 'XYZAB' # though AB is barely supported here
+
     DispatchMap = {}
 
     VDCommand = { 
@@ -419,6 +425,8 @@ class ToOpenSBP:
 
         # xyzf etc state
         self.current_location = { p:None for p in self.post.values["PARAMETER_ORDER"] } 
+        self.current_location['JSXY'] = None
+        self.current_location['JSZ'] = None
 
         self.set_units = None # flag and memory of the first time we see a G20/G21 set-units
         self._postfix = [] # balancing things to add to end
@@ -523,10 +531,15 @@ class ToOpenSBP:
         We return a string, which might be multi-line,
         or '' to mean nothing resulted
         """
-        command = path_command.Name
-        if command.startswith('('):
+        command = None
+        if path_command.Name.startswith('('):
             # sadly, Path.Command doesn't set .Name to "comment", but rather to the comment string
             command = 'comment'
+        else:
+            # canonicalize to 2 digits
+            # All the @gcode() methods can now assume 2 digits
+            path_command.Name = re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', path_command.Name)
+            command = path_command.Name
 
         if command in self.DispatchMap:
             rez = self.DispatchMap[command](self, path_command ) # careful, doesn't do inheritance lookup
@@ -537,8 +550,8 @@ class ToOpenSBP:
                 FreeCAD.Console.PrintError(message+"\n")
                 raise NotImplementedError(message)
             else:
-                FreeCAD.Console.PrintWarning("Skipped: " + message + "\n")
-                return self.comment(message)
+                FreeCAD.Console.PrintWarning("Skipped:  " + message + "\n")
+                return self.comment(message, force=True) # FIXME: remove force
 
     def location(self, path_command=None):
         """a message fragment of where we are, and the path_command if you want
@@ -589,11 +602,11 @@ class ToOpenSBP:
 
             return nl.join(rez) + nl
 
-    @gcode('G90', 'G91')
+    @gcode('G90') # no relative (G91) yet
     def t_absolute_mode(self, path_command):
         return { 'G90':'SA', 'G91':'SR' }[ path_command.Name ] + nl
 
-    @gcode('M6')
+    @gcode('M06')
     def t_toolchange(self, path_command):
         if self.post.values['OUTPUT_TOOL_CHANGE']:
             tool_number = int(path_command.Parameters['T'])
@@ -620,11 +633,108 @@ class ToOpenSBP:
         else:
             rez = ''
 
-        rez += self.set_speeds(tool_controller, path_command)
+        rez += self.set_initial_speeds(tool_controller, path_command)
 
         return rez
 
-    def set_speeds(self, tool_controller, path_command):
+    @gcode("G00", "G01")
+    def t_move(self, path_command):
+        """Oh boy.
+        opensbp specifies the x, y speed, and Z speed separately for a motion.
+        e.g. a "MS,sx,sy,sz" then a "M3,x,y,z".
+        Gcode has a F which the speed of the vector
+        and, for rapid, it's whatever-the-machine-setting-is.
+        FreeCAD has horizontal speed (xy), and vertical speed (z),
+        which it uses to calculate F.
+        And, we should respect the Rapid speeds, 
+        so we pull rapid at set_initial_speed() time for each tool-change.
+        Finally, we have to take the delta(x,y,z) vector and project the F (or rapid) speed onto each axis,
+        to generate the MS or JS command before each move command.
+        The Mx or Jx just uses the axis distances.
+        """
+        rez = ''
+
+        # Optimize the command, specifying 1..5 axis values
+        # XYZABC, but reversed
+        r_axis = [ path_command.Parameters.get(a,None) for a in reversed(self.AllowedAxis) ]
+        first_not_none = 0
+        for i,a in enumerate(r_axis):
+            if a is not None:
+                first_not_none = i
+                break
+        print(f"### specified r_axis {r_axis}[{first_not_none}:]")
+        axis = list(reversed(r_axis[first_not_none:]))
+        print(f"### specified axis {axis}")
+
+        if feed_rate := path_command.Parameters.get('F', None):
+            if path_command.Name == 'G00':
+                if self.post.arguments.abort_on_unknown:
+                    raise ValueError(f"Rapid moves (G0) can't have an F at {self.location(path_command)}")
+
+        print(f"### move {path_command.Name} F {feed_rate}")
+        rez += self.set_speed( path_command, feed_rate )
+
+        native_command = 'J' if path_command.Name == 'G00' else "M"
+        axis_ct = len(axis)
+        if axis_ct == 1:
+            native_command += 'X'
+        else:
+            native_command += str(axis_ct)
+
+        formatted_axis = ( format(a,f".{self.post.values['FEED_PRECISION']}f") for a in axis )
+        rez += f"{native_command},{','.join(formatted_axis)}" + nl
+        print(f"### move\n{rez}###")
+
+        return rez
+
+    def set_speed( self, path_command, feed_rate ):
+        # For non-rapid, F applies to the vector of all the axis
+        # likewise, for Rapid, HorizRapid applies to the XY vector, and VertRapid to the Z
+        native_command = None
+        if path_command.Name == "G00":
+            native_command = 'JS'
+        else:
+            native_command = 'MS'
+
+
+        last_position = [ float(self.current_location[a] or 0) for a in self.AllowedAxis ]
+        this_position = [ float(self.current_location[a] or 0) for a in self.AllowedAxis ] # so axis can be omitted from a command
+        # update with the explicit positions
+        for i,a in enumerate(self.AllowedAxis):
+            if v:=path_command.Parameters.get(a,None):
+                this_position[i] = v
+        fmt_diff = lambda l:  [f"{p:9.3f}" for p in l]
+        print(f"### Last {fmt_diff(last_position)}")
+        print(f"### This {fmt_diff(this_position)}")
+
+        d_axis = list(map(operator.sub, this_position, last_position))
+        print(f"### d_axis {fmt_diff(d_axis)}")
+        distance = math.sqrt( sum( [ v**2 for v in d_axis] ) )
+        print(f"### dist {distance}")
+        if path_command.Name == 'G00':
+            rapid_speeds = [ 0.0 for a in self.AllowedAxis ]
+            for i,a in enumerate([ 'JSXY', 'JSXY', 'JSZ' ]):
+                rapid_speeds[i] = self.current_location[a]
+            print(f"### rapid_speeds {fmt_diff(rapid_speeds)}")
+            speeds = [ rapid_speeds[i] * d/distance for i,d in enumerate(d_axis) ]
+        else:
+            f = path_command.Parameters.get('F', None)
+            print(f"### command f {f}")
+            if f is None:
+                f = self.current_location['F']
+                print(f"### cur_loc f {f}")
+            if f is None:
+                raise ValueError(f"No previous F speed at {self.location(path_command)}")
+            
+            speeds = [ f * d/distance for d in d_axis ]
+
+        speeds = [ format(s, f'.{self.post.values["AXIS_PRECISION"]}f') for s in speeds ]
+        print(f"### fmt speeds {speeds}")
+        cmd = f"{native_command},{','.join(speeds)}"
+        print(f"### cmd {cmd}")
+        return cmd + nl
+
+    def set_initial_speeds(self, tool_controller, path_command):
         # need to ensure initial values for speeds
         # rapid-speed is never emitted by gcode, but we need to set it!
         # and we just set the initial speed for "feed" too
@@ -686,6 +796,9 @@ class ToOpenSBP:
 
         if speeds['has_js'] > 0:
             native += "JS," + ','.join( speeds['js'] ) + "\n"
+            self.current_location['JSXY'] = float(speeds['js'][0])
+            self.current_location['JSZ'] = float(speeds['js'][2])
+
 
         print(f"### setspeeds hasjs {speeds['has_js']} {speeds['js']}")
         if self.post.arguments.abort_on_unknown and speeds['has_js'] < 3:
