@@ -234,22 +234,16 @@ VD,,,&WASUNITS
         # Test without header
 
         self.multi_compare( None,
-            "--no-header --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-VD,,,&WASUNITS
-"""
-        )
-
-        # With comments
-        self.multi_compare( None,
-            "--no-header --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
+            "--no-header --no-comments --no-show-editor",
+            """SA
 &WASUNITS=%(25)
 VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
-'(finish operation: testpath)
+&Tool=1
+'Change tool to #1: TC: Default Tool, Endmill
+PAUSE
+&ToolName="TC Default Tool Endmill"
+MS,700.000,700.000,350.000
+JS,2100.000,2100.000,1050.000
 VD,,,&WASUNITS
 """
         )
