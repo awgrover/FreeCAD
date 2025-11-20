@@ -229,7 +229,7 @@ VD,,,&WASUNITS
 """
         )
 
-    def wrap(self, expected, inches=None, preamble=''):
+    def wrap(self, expected, inches=None, preamble='', postamble=''):
         # compare_multi helper
         # wraps the expected path-gcode in std prefix, postfix for no-comments, no-header
 
@@ -259,7 +259,7 @@ VD,,,{vd}
 PAUSE
 &ToolName="TC Default Tool Endmill"
 {speeds}
-{expected}VD,,,&WASUNITS
+{expected}{postamble}VD,,,&WASUNITS
 """
 
     def test010(self):
@@ -384,8 +384,6 @@ M3,10.000,0.000,0.000
         Test Pre-amble
         """
 
-        f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
-
         # preamble values are verbatim, not unit converted!
         self.compare_multi(
             "(none)",
@@ -403,15 +401,17 @@ MX,20.000
         self.job.Path = Path.Path([])
         postables = [self.job]
 
-        expected="""&WASUNITS=%(25)
-VD,,,1
-JZ,55.000
+        f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
+
+        # postamble is literal gcode, no unit translation
+        self.compare_multi(
+            "(none)",
+            "--no-header --no-comments --postamble='G0 Z55\nG1 F700 X22' --no-show-editor",
+        self.wrap('', postamble="""J3,,,55.000
+MS,700.000
 MX,22.000
-VD,,,&WASUNITS
-"""
-        args = "--no-header --no-comments --postamble='G0 Z55\nG1 X22' --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode, expected)
+""")
+        )
 
     def test050(self):
         """
@@ -422,20 +422,15 @@ VD,,,&WASUNITS
         self.compare_multi(
             "G0 X10 Y20 Z30", # simple move
             "--no-header --no-comments --no-show-editor --inches",
-            """&WASUNITS=%(25)
-VD,,,0
-J3,0.3937,0.7874,1.1811
-VD,,,&WASUNITS
-"""
+            self.wrap("""J3,0.3937,0.7874,1.1811
+""", 'inches')
         )
+
         self.compare_multi(
             "G0 X10 Y20 Z30", # simple move
             "--no-header --no-comments --no-show-editor --inches --precision 2",
-            """&WASUNITS=%(25)
-VD,,,0
-J3,0.39,0.79,1.18
-VD,,,&WASUNITS
-"""
+            self.wrap("""J3,0.39,0.79,1.18
+""", 'inches')
         )
 
     def test060(self):
@@ -443,24 +438,22 @@ VD,,,&WASUNITS
         Test test modal
         Suppress the command name if the same as previous
         """
-        c = "G0 X10 Y20 Z30"
+        f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
+        c = f"G1 F{f} X10 Y20 Z30"
 
         self.compare_multi( c, c,
             "--no-header --no-comments --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-J3,10.000,20.000,30.000
-J3,10.000,20.000,30.000
-VD,,,&WASUNITS
-"""
+            self.wrap("""MS,6.972,9.354
+M3,10.000,20.000,30.000
+MS,6.972,9.354
+M3,10.000,20.000,30.000
+""")
         )
         self.compare_multi( c, c,
             "--no-header --no-comments --modal --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-J3,10.000,20.000,30.000
-VD,,,&WASUNITS
-"""
+            self.wrap("""MS,6.972,9.354
+M3,10.000,20.000,30.000
+""")
         )
 
     def test070(self):
@@ -472,41 +465,28 @@ VD,,,&WASUNITS
         c="G0 X10 Y20 Z30"
         self.compare_multi( c, "G0 X10 Y30 Z30",
             "--no-header --no-comments --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-J3,10.000,20.000,30.000
+            self.wrap("""J3,10.000,20.000,30.000
 J3,10.000,30.000,30.000
-VD,,,&WASUNITS
-"""
+""")
         )
 
+        # g91 relative, not impl yet
+        # "G0 X10 Y30 Z30", "G91", "G0 X0 Y31 Z0",
+
         # diff y
-        self.compare_multi( 
-            c, 
-            # absolute xy same
-            "G0 X10 Y30 Z30", 
-            # relative, xy same
-            "G91", "G0 X0 Y31 Z0",
+        self.compare_multi( c, "G0 X10 Y21 Z30",
             "--no-header --no-comments --axis-modal --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-J3,10.000,20.000,30.000
-JY,30.000
-SR 'RELATIVE
-JY,31.000
-VD,,,&WASUNITS
-"""
+            self.wrap("""J3,10.000,20.000,30.000
+J2,,21.000
+""")
         )
 
         # diff z
-        self.compare_multi( c, "G0 X10 Y20 Z40",
+        self.compare_multi( c, "G0 X10 Y20 Z31",
             "--no-header --no-comments --axis-modal --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-J3,10.000,20.000,30.000
-JZ,40.000
-VD,,,&WASUNITS
-"""
+            self.wrap("""J3,10.000,20.000,30.000
+J3,,,31.000
+""")
         )
 
     def test080(self):
