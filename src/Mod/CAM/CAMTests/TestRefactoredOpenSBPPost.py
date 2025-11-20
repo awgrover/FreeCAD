@@ -192,8 +192,8 @@ VD,,,1
 PAUSE
 &ToolName="TC Default Tool Endmill"
 'set speeds: TC: Default Tool
-MS,700.000,700.000,350.000
-JS,2100.000,2100.000,1050.000
+MS,700.000,350.000
+JS,2100.000,1050.000
 '(Finish operation: TC: Default Tool)
 '(Begin operation: Profile)
 '(Machine units: mm/min)
@@ -217,8 +217,8 @@ VD,,,1
 'Change tool to #1: TC: Default Tool, Endmill
 PAUSE
 &ToolName="TC Default Tool Endmill"
-MS,700.000,700.000,350.000
-JS,2100.000,2100.000,1050.000
+MS,700.000,350.000
+JS,2100.000,1050.000
 VD,,,&WASUNITS
 """
         )
