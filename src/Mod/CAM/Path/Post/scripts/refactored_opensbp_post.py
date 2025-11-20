@@ -660,6 +660,13 @@ class ToOpenSBP:
         Finally, we have to take the delta(x,y,z) vector and project the F speed onto xy, and z
         to generate the MS command before each move command.
         The Mx or Jx just uses the axis distances.
+        FIXME? If the first motion is not G0, and axis are 'Z' + X|Y,
+            (e.g. G1 X10 Y20 Z30)
+            then we don't know how to calculate the MS speed,
+            because we need to know the last-position to split F across Z & X|Y,
+            and there isn't one (that we know about), though we init'd to 0,0,0.
+            We assume a G1 happens before any other motion, to establish a position.
+            We could abort on this...
         """
         rez = ''
 
@@ -690,7 +697,7 @@ class ToOpenSBP:
         else:
             native_command += str(axis_ct)
 
-        formatted_axis = ( format(a,f".{self.post.values['FEED_PRECISION']}f") for a in axis )
+        formatted_axis = ( (format(a,f".{self.post.values['FEED_PRECISION']}f") if a is not None else '') for a in axis )
         rez += f"{native_command},{','.join(formatted_axis)}" + nl
         print(f"### move\n{rez}###")
 
@@ -743,9 +750,14 @@ class ToOpenSBP:
             # FIXME: AB not handled yet
             speeds = [ (f * d/distance) for d in distances_for_speed ]
 
-        speeds = [ format(s, f'.{self.post.values["AXIS_PRECISION"]}f') for s in speeds ]
+        axis = [ a for a in self.PositionAxis if a in path_command.Parameters ]
+        print(f"### set_speed axis {axis}")
+
+        # elide 0's, since that means we aren't moving in that axis
+        speeds = [ (format(s, f'.{self.post.values["AXIS_PRECISION"]}f') if s!=0.0 else '') for s in speeds ]
         print(f"### fmt speeds {speeds}")
-        cmd = f"{native_command},{','.join(speeds)}"
+        # cleans up trailing , when trailing speeds elided
+        cmd = f"{native_command},{','.join(speeds)}".rstrip(',')
         print(f"### cmd {cmd}")
         return cmd + nl
 

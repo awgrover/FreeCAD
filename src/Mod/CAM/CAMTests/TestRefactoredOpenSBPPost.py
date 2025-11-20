@@ -326,6 +326,39 @@ M3,0.39,0.79,1.18
 """, 'inches')
         )
 
+    def test020(self):
+        """Test single access vs speed"""
+
+        f = 700.0 / 60.0 # mm/s
+
+        # one axis: X
+        self.compare_multi(
+            f"G1 F{f} X10",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap("""MS,700.000
+MX,10.000
+""")
+        )
+
+        # one axis: Z
+        self.compare_multi(
+            f"G1 F{f} Z10",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap("""MS,,700.000
+M3,,,10.000
+""")
+        )
+
+        # this relies on the internal initial position being 0,0,0
+        # and probably should be illegal without an initial G0
+        self.compare_multi(
+            f"G1 F{f} X10 Y0 Z0",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap("""MS,700.000
+M3,10.000,0.000,0.000
+""")
+        )
+
     def test030(self):
         """
         Test Pre-amble
@@ -334,15 +367,12 @@ M3,0.39,0.79,1.18
         self.job.Path = Path.Path([])
         postables = [self.job]
 
-        expected="""&WASUNITS=%(25)
-VD,,,1
-JZ,50.000
+        self.compare_multi(None,
+            "--no-header --no-comments --preamble='G0 Z50\nG1 X20' --no-show-editor --metric",
+            """JZ,50.000
 MX,20.000
-VD,,,&WASUNITS
 """
-        args = "--no-header --no-comments --preamble='G0 Z50\nG1 X20' --no-show-editor"
-        gcode = postprocessor.export(postables, "-", args)
-        self.assertEqual(gcode, expected)
+        )
 
     def test040(self):
         """
