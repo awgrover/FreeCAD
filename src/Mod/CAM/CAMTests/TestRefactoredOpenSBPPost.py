@@ -292,31 +292,37 @@ VD,,,&WASUNITS
         """
         Test precision with G1, which generates MS commands
         """
+        f = 700.0 / 60.0 # mm/s
+
         # default is metric-mm (internal default)
         self.compare_multi(
-            "G1 F700 X10 Y20 Z30", # simple rapid
+            f"G1 F{f} X10 Y20 Z30", # simple rapid
             "--no-header --no-comments --no-show-editor --metric --no-abort-on-unknown",
-            self.wrap("""M3,10.000,20.000,30.000
+            self.wrap("""MS,418.330,561.249
+M3,10.000,20.000,30.000
 """),
         )
 
         self.compare_multi(
-            "G1 F700 X10 Y20 Z30",
+            f"G1 F{f} X10 Y20 Z30",
             "--no-header --no-comments --precision=2 --no-show-editor",
-            self.wrap("""M3,10.00,20.00,30.00
+            self.wrap("""MS,418.33,561.25
+M3,10.00,20.00,30.00
 """),
         )
 
         self.compare_multi(
-            "G1 F700 X10 Y20 Z30",
+            f"G1 F{f} X10 Y20 Z30",
             "--no-header --no-comments --inches --no-show-editor",
-            self.wrap("""M3,0.3937,0.7874,1.1811
+            self.wrap("""MS,16.4697,22.0964
+M3,0.3937,0.7874,1.1811
 """, 'inches'),
         )
         self.compare_multi(
-            "G1 F700 X10 Y20 Z30",
+            f"G1 F{f} X10 Y20 Z30",
             "--no-header --no-comments --inches --precision=2 --no-show-editor",
-            self.wrap("""M3,0.39,0.79,1.18
+            self.wrap("""MS,16.47,22.10
+M3,0.39,0.79,1.18
 """, 'inches')
         )
 

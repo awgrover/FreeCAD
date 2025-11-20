@@ -699,7 +699,8 @@ class ToOpenSBP:
 
     def set_speed( self, path_command, feed_rate ):
         # For non-rapid, F applies to the vector of all the axis
-        # likewise, for Rapid, HorizRapid applies to the XY vector, and VertRapid to the Z
+        # For rapid, full speed on the axis from the toolchange settings
+        #   (so no output here)
         native_command = None
         if path_command.Name == "G00":
             native_command = 'JS'
@@ -708,7 +709,6 @@ class ToOpenSBP:
             return ''
         else:
             native_command = 'MS'
-
 
         last_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ]
         ##this_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ] # so axis can be omitted from a command
@@ -740,7 +740,7 @@ class ToOpenSBP:
             if f is None:
                 raise ValueError(f"No previous F speed at {self.location(path_command)}")
             
-            speeds = [ f * d/distance for d in distances_for_speed ]
+            speeds = [ (f * d/distance) for d in distances_for_speed ]
 
         speeds = [ format(s, f'.{self.post.values["AXIS_PRECISION"]}f') for s in speeds ]
         print(f"### fmt speeds {speeds}")
