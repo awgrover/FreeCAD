@@ -223,17 +223,33 @@ VD,,,&WASUNITS
 """
         )
 
-    def wrap(self, expected):
-        # wraps in std prefix, postfix
+    def wrap(self, expected, inches=None):
+        # wraps in std prefix, postfix for no-comments, no-header
+
+        # hack'ish: adapt to precision
+        if m := re.search(r'\.(\d+)', expected):
+            z = '0' * len(m.group(1))
+        else:
+            z = '0' * 3
+
+        if inches:
+            vd = '0'
+            fmt = lambda v : format(v, f"0.{len(z)}f")
+            speeds=f"""MS,{fmt(27.5591)},{fmt(13.7795)}
+JS,{fmt(82.6772)},{fmt(41.3386)}"""
+        else:
+            vd = '1'
+            speeds=f"""MS,700.{z},350.{z}
+JS,2100.{z},1050.{z}"""
+
         return f"""SA
 &WASUNITS=%(25)
-VD,,,1
+VD,,,{vd}
 &Tool=1
 'Change tool to #1: TC: Default Tool, Endmill
 PAUSE
 &ToolName="TC Default Tool Endmill"
-MS,700.000,700.000,350.000
-JS,2100.000,2100.000,1050.000
+{speeds}
 {expected.rstrip()}
 VD,,,&WASUNITS
 """
@@ -248,47 +264,60 @@ VD,,,&WASUNITS
         self.compare_multi(
             "G0 X10 Y20 Z30", # simple rapid
             "--no-header --no-comments --no-show-editor --metric --no-abort-on-unknown",
-            self.wrap("""JS,561.249,1122.497,0.000,0.000 FIXME XY is together, z separate
-J3,10.000,20.000,30.000
+            self.wrap("""J3,10.000,20.000,30.000
 """),
         )
 
         self.compare_multi(
             "G0 X10 Y20 Z30",
             "--no-header --no-comments --precision=2 --no-show-editor",
-            self.wrap("""JS,561.25,1122.50,841.87,0.00,0.00
-J3,10.00,20.00,30.00
+            self.wrap("""J3,10.00,20.00,30.00
 """),
         )
 
         self.compare_multi(
             "G0 X10 Y20 Z30",
             "--no-header --no-comments --inches --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,0
-J3,0.3937,0.7874,1.1811
-VD,,,&WASUNITS
-""",
+            self.wrap("""J3,0.3937,0.7874,1.1811
+""", 'inches'),
         )
         self.compare_multi(
             "G0 X10 Y20 Z30",
             "--no-header --no-comments --inches --precision=2 --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,0
-J3,0.39,0.79,1.18
-VD,,,&WASUNITS
-"""
+            self.wrap("""J3,0.39,0.79,1.18
+""", 'inches')
         )
 
-        # override as --metric
+    def test015(self):
+        """
+        Test precision with G1, which generates MS commands
+        """
+        # default is metric-mm (internal default)
         self.compare_multi(
-            "G0 X10 Y20 Z30",
-            "--no-header --no-comments --metric --precision=3 --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-J3,10.000,20.000,30.000
-VD,,,&WASUNITS
-"""
+            "G1 F700 X10 Y20 Z30", # simple rapid
+            "--no-header --no-comments --no-show-editor --metric --no-abort-on-unknown",
+            self.wrap("""M3,10.000,20.000,30.000
+"""),
+        )
+
+        self.compare_multi(
+            "G1 F700 X10 Y20 Z30",
+            "--no-header --no-comments --precision=2 --no-show-editor",
+            self.wrap("""M3,10.00,20.00,30.00
+"""),
+        )
+
+        self.compare_multi(
+            "G1 F700 X10 Y20 Z30",
+            "--no-header --no-comments --inches --no-show-editor",
+            self.wrap("""M3,0.3937,0.7874,1.1811
+""", 'inches'),
+        )
+        self.compare_multi(
+            "G1 F700 X10 Y20 Z30",
+            "--no-header --no-comments --inches --precision=2 --no-show-editor",
+            self.wrap("""M3,0.39,0.79,1.18
+""", 'inches')
         )
 
     def test030(self):

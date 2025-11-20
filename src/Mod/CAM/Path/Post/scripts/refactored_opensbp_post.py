@@ -407,7 +407,7 @@ class ToOpenSBP:
     """Translate gcode to opensbp
     """
 
-    AllowedAxis = 'XYZAB' # though AB is barely supported here
+    PositionAxis = 'XYZAB' # though AB is barely supported here
 
     DispatchMap = {}
 
@@ -427,6 +427,7 @@ class ToOpenSBP:
         self.current_location = { p:None for p in self.post.values["PARAMETER_ORDER"] } 
         self.current_location['JSXY'] = None
         self.current_location['JSZ'] = None
+        self.end_location = [ None for x in self.PositionAxis ]
 
         self.set_units = None # flag and memory of the first time we see a G20/G21 set-units
         self._postfix = [] # balancing things to add to end
@@ -462,16 +463,25 @@ class ToOpenSBP:
 
             self.track_by_comments( path_command )
 
+            # one place to figure out our end, for set_speed()
             if self.post.arguments.gcode_comments and not path_command.Name.startswith('('):
                 native += self.comment( f"[{self.post.values['line_number']}] {path_command.toGCode()}" )
 
+            if path_command.Name in self.post.values['MOTION_COMMANDS']:
+                self.end_location = [ 
+                    float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
+                    for a in self.current_location if a in self.PositionAxis 
+                ]
+                print(f"### end at {self.end_location}")
+
             print(f"### path_command is {path_command.__class__.__name__}")
             rez = self.dispatch( path_command )
-            sys.stdout.write(f"### translated: {rez}")
+            print(f"### translated: {rez.rstrip()}")
             native += rez
             
-            self.current_location.update(path_command.Parameters)
-            print(f"### current {self.current_location}")
+            if path_command.Name in self.post.values['MOTION_COMMANDS']:
+                self.current_location.update(path_command.Parameters)
+                print(f"### current {self.current_location}")
             
         native += self.postfix()
 
@@ -640,15 +650,15 @@ class ToOpenSBP:
     @gcode("G00", "G01")
     def t_move(self, path_command):
         """Oh boy.
-        opensbp specifies the x, y speed, and Z speed separately for a motion.
-        e.g. a "MS,sx,sy,sz" then a "M3,x,y,z".
+        opensbp specifies the xy speed, and Z speed separately for a motion.
+        e.g. a "MS,sxy,sz" then a "M3,x,y,z".
         Gcode has a F which the speed of the vector
         and, for rapid, it's whatever-the-machine-setting-is.
         FreeCAD has horizontal speed (xy), and vertical speed (z),
-        which it uses to calculate F.
+        which it uses to calculate F, (and a rapid horiz & vert speed).
         And, we should respect the Rapid speeds, 
-        so we pull rapid at set_initial_speed() time for each tool-change.
-        Finally, we have to take the delta(x,y,z) vector and project the F (or rapid) speed onto each axis,
+        We pull rapid at set_initial_speed() time for each tool-change.
+        Finally, we have to take the delta(x,y,z) vector and project the F (or rapid) speed onto xy, and z
         to generate the MS or JS command before each move command.
         The Mx or Jx just uses the axis distances.
         """
@@ -656,14 +666,14 @@ class ToOpenSBP:
 
         # Optimize the command, specifying 1..5 axis values
         # XYZABC, but reversed
-        r_axis = [ path_command.Parameters.get(a,None) for a in reversed(self.AllowedAxis) ]
+        axis = [ path_command.Parameters.get(a,None) for a in self.PositionAxis ]
         first_not_none = 0
-        for i,a in enumerate(r_axis):
-            if a is not None:
+        for i in reversed(range(0,len(axis))):
+            if axis[i] is not None:
                 first_not_none = i
                 break
-        print(f"### specified r_axis {r_axis}[{first_not_none}:]")
-        axis = list(reversed(r_axis[first_not_none:]))
+        print(f"### specified axis {axis}[{first_not_none}:]")
+        axis = axis[:first_not_none+1]
         print(f"### specified axis {axis}")
 
         if feed_rate := path_command.Parameters.get('F', None):
@@ -693,30 +703,34 @@ class ToOpenSBP:
         native_command = None
         if path_command.Name == "G00":
             native_command = 'JS'
+            # Actually, we just use the full speed on xy and z axis
+            # which was initialized at toolchange time
+            return ''
         else:
             native_command = 'MS'
 
 
-        last_position = [ float(self.current_location[a] or 0) for a in self.AllowedAxis ]
-        this_position = [ float(self.current_location[a] or 0) for a in self.AllowedAxis ] # so axis can be omitted from a command
-        # update with the explicit positions
-        for i,a in enumerate(self.AllowedAxis):
-            if v:=path_command.Parameters.get(a,None):
-                this_position[i] = v
-        fmt_diff = lambda l:  [f"{p:9.3f}" for p in l]
+        last_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ]
+        ##this_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ] # so axis can be omitted from a command
+        fmt_diff = lambda l:  [(f"{p:9.3f}" if p is not None else f"{str(p):9s}") for p in l]
         print(f"### Last {fmt_diff(last_position)}")
-        print(f"### This {fmt_diff(this_position)}")
+        print(f"### end {self.end_location}")
+        print(f"### end {fmt_diff(self.end_location)}")
 
-        d_axis = list(map(operator.sub, this_position, last_position))
+        d_axis = list(map(operator.sub, self.end_location, last_position))
         print(f"### d_axis {fmt_diff(d_axis)}")
-        distance = math.sqrt( sum( [ v**2 for v in d_axis] ) )
-        print(f"### dist {distance}")
+        squared_d_axis = [ v**2 for v in d_axis]
+        distance = math.sqrt( sum( squared_d_axis ) )
+        xy_distance = math.sqrt( sum( squared_d_axis[:2] ) )
+        distances_for_speed = [ xy_distance, d_axis[2] ] # xy, z
+        print(f"### dist {distance} d xy,z {distances_for_speed}")
+
         if path_command.Name == 'G00':
-            rapid_speeds = [ 0.0 for a in self.AllowedAxis ]
-            for i,a in enumerate([ 'JSXY', 'JSXY', 'JSZ' ]):
-                rapid_speeds[i] = self.current_location[a]
-            print(f"### rapid_speeds {fmt_diff(rapid_speeds)}")
-            speeds = [ rapid_speeds[i] * d/distance for i,d in enumerate(d_axis) ]
+            # Rapid speed is the full speed on xy, and z
+            # no projecting on to the vector
+            # FIXME: AB not handled yet
+            speeds = [ self.current_location['JSXY'], self.current_location['JSZ' ] ]
+            print(f"### rapid_speeds {fmt_diff(speeds)}")
         else:
             f = path_command.Parameters.get('F', None)
             print(f"### command f {f}")
@@ -726,7 +740,7 @@ class ToOpenSBP:
             if f is None:
                 raise ValueError(f"No previous F speed at {self.location(path_command)}")
             
-            speeds = [ f * d/distance for d in d_axis ]
+            speeds = [ f * d/distance for d in distances_for_speed ]
 
         speeds = [ format(s, f'.{self.post.values["AXIS_PRECISION"]}f') for s in speeds ]
         print(f"### fmt speeds {speeds}")
@@ -744,9 +758,9 @@ class ToOpenSBP:
 
         native += self.comment(f"set speeds: {tool_controller.Label}")
         speeds = {
-            "ms" : [], # x,y,z . x==y
+            "ms" : [], # xy,z
             "has_ms" : 0, # each axis adds 1 to xyz=3
-            "js" : [], # x,y,z . x==y
+            "js" : [], # xy,z
             "has_js" : 0, # each axis adds 1 to xyz=3
         }
 
@@ -756,7 +770,6 @@ class ToOpenSBP:
 
             xy = PostUtilsParse.format_for_feed(self.post.values, tool_controller.HorizFeed)
             speeds['ms'].append( xy )
-            speeds['ms'].append( xy )
         else:
             speeds['ms'].append('')
             native += self.comment("no HorizFeed", force=True)
@@ -765,7 +778,6 @@ class ToOpenSBP:
             z = PostUtilsParse.format_for_feed(self.post.values, tool_controller.VertFeed )
             speeds['ms'].append( z )
         else:
-            speeds['ms'].append('')
             speeds['ms'].append('')
             native += self.comment("no VertFeed", force=True)
 
@@ -780,9 +792,7 @@ class ToOpenSBP:
             speeds['has_js'] += 2
             xy = PostUtilsParse.format_for_feed(self.post.values, tool_controller.HorizRapid )
             speeds['js'].append( xy )
-            speeds['js'].append( xy )
         else:
-            speeds['js'].append('')
             speeds['js'].append('')
             native += self.comment("no HorizRapid", force=True)
 
@@ -797,8 +807,7 @@ class ToOpenSBP:
         if speeds['has_js'] > 0:
             native += "JS," + ','.join( speeds['js'] ) + "\n"
             self.current_location['JSXY'] = float(speeds['js'][0])
-            self.current_location['JSZ'] = float(speeds['js'][2])
-
+            self.current_location['JSZ'] = float(speeds['js'][1])
 
         print(f"### setspeeds hasjs {speeds['has_js']} {speeds['js']}")
         if self.post.arguments.abort_on_unknown and speeds['has_js'] < 3:
