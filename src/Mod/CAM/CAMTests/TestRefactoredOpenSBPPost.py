@@ -64,32 +64,33 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
 
         # Open existing FreeCAD document with test geometry
         cls.doc = FreeCAD.open(FreeCAD.getHomePath() + "/Mod/CAM/CAMTests/boxtest.fcstd")
-        cls.job = cls.doc.getObject("Job")
 
-        # we only fixup the first tool-controller for feed rates
-        # but we setup setupsheet which will get all the tools for rapid
-        tool_controller = cls.job.Tools.Group[0]
+    @classmethod
+    def fixup_test_context(cls):
+        # we fixup the tool-controllers for feed rates
+        # we setup setupsheet which will get all the tools for rapid
+        for tool_controller in cls.job.Tools.Group:
 
-        # shopbot native is mm/s, freecad is mm/min
-        if tool_controller.HorizFeed.Value == 0.0:
-            tool_controller.HorizFeed = Units.Quantity(FeedSpeed, "mm/min")
-        if tool_controller.VertFeed.Value == 0.0:
-            tool_controller.VertFeed = Units.Quantity(FeedSpeed/2, "mm/min")
+            # shopbot native is mm/s, freecad is mm/min
+            if tool_controller.HorizFeed.Value == 0.0:
+                tool_controller.HorizFeed = Units.Quantity(FeedSpeed, "mm/min")
+            if tool_controller.VertFeed.Value == 0.0:
+                tool_controller.VertFeed = Units.Quantity(FeedSpeed/2, "mm/min")
+            #settings = { p:getattr(tool_controller, p) for p in ['HorizFeed','VertFeed','HorizRapid','VertRapid'] }
+            #print(f"### tc setup {settings}")
         setup_sheet = cls.job.SetupSheet
         if setup_sheet.HorizRapid.Value == 0.0:
             setup_sheet.HorizRapid = Units.Quantity(RapidSpeed, "mm/min")
         if setup_sheet.VertRapid.Value == 0.0:
             setup_sheet.VertRapid = Units.Quantity(RapidSpeed/2, "mm/min")
         cls.doc.recompute()
-        #settings = { p:getattr(tool_controller, p) for p in ['HorizFeed','VertFeed','HorizRapid','VertRapid'] }
-        #print(f"### tc setup {settings}")
 
-        cls.post = PostProcessorFactory.get_post_processor(cls.job, "refactored_opensbp")
-        for op in cls.job.Operations.Group:
-            if op.Label == "Profile":
-                # remember the "Profile" operation
-                cls.profile_op = op
-                return
+        if len(cls.job.Operations.Group) > 0:
+            # restrict to one job
+            cls.job.Operations.Group = [ cls.job.Operations.Group[0] ]
+            # remember the "Profile" operation
+            cls.profile_op = cls.job.Operations.Group[0]
+            print(f"### Operation {cls.job.Label}.{cls.profile_op.Label}")
 
     @classmethod
     def tearDownClass(cls):
@@ -113,6 +114,13 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         """
         self.maxDiff = None
         self.doc.UnitSystem = 'Metric small parts & CNC (mm, mm/min)'
+       
+        # in case someone chooses a different job
+        self.__class__.job = self.doc.getObject("Job")
+        self.__class__.post = PostProcessorFactory.get_post_processor(self.job, "refactored_opensbp")
+        self.__class__.fixup_test_context()
+
+
         #reload(
         #    postprocessor
         #)  # technical debt.  This shouldn't be necessary but here to bypass a bug
@@ -135,8 +143,13 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         `remove` is a pattern to remove lines from both expected and generated
         """
 
-        if isinstance(args[0],str):
+        if args[0] is None:
+            self.profile_op.Path = Path.Path([])
+        elif isinstance(args[0],str):
             self.profile_op.Path = Path.Path([ Path.Command(x) for x in args[:-2]])
+        else:
+            # assume Path.Commands
+            self.profile_op.Path = Path.Path(args[:-2])
         post_args = args[-2]
         expected = args[-1]
 
@@ -494,28 +507,39 @@ J3,,,31.000
         Test tool change, and spindle
         """
 
-        # both tool and spindle: manual
+        self.__class__.job = self.doc.getObject("Job001")
+        self.__class__.post = PostProcessorFactory.get_post_processor(self.job, "refactored_opensbp")
+        self.__class__.fixup_test_context()
+
         gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
+
+        # both tool and spindle: manual
         self.compare_multi( *gcode_in,
             "--no-header --no-comments --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
+            """SA
 &WASUNITS=%(25)
 VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
-'(tool change)
+&Tool=1
+'Change tool to #1: T1, 1/8" two flute002
+'First change tool, should already be #1: T1, 1/8" two flute002
+&ToolName="T1 1/8 two flute002"
+MS,11.667,5.833
+JS,35.000,17.500
 &Tool=2
-'(First change tool, should already be #2: 2)
-&ToolName="2"
+'Change tool to #2: T3, Fly Cutter
+PAUSE
+&ToolName="T3 Fly Cutter"
+MS,11.667,5.833
+JS,35.000,17.500
 TR,3000
 'Change spindle speed to 3000
 PAUSE
-'(tool change)
 &Tool=3
-'Change tool to #3: 3
+'Change tool to #3: T2, 1/8" two flute003
 PAUSE
-&ToolName="3"
-'(finish operation: testpath)
+&ToolName="T2 1/8 two flute003"
+MS,11.667,5.833
+JS,35.000,17.500
 VD,,,&WASUNITS
 """,
         )
@@ -523,34 +547,54 @@ VD,,,&WASUNITS
         # both tool and spindle: auto
         self.compare_multi( *gcode_in,
             "--toolchanger --no-comments --spindle-controller --no-header --no-show-editor",
-            """&WASUNITS=%(25)
+            """SA
+&WASUNITS=%(25)
 VD,,,1
+&Tool=1
+C9 'toolchanger
+&ToolName="T1 1/8 two flute002"
+MS,11.667,5.833
+JS,35.000,17.500
 &Tool=2
 C9 'toolchanger
-&ToolName="2"
+&ToolName="T3 Fly Cutter"
+MS,11.667,5.833
+JS,35.000,17.500
 TR,3000
 C6 'spindle-controller
 PAUSE 3
 &Tool=3
 C9 'toolchanger
-&ToolName="3"
+&ToolName="T2 1/8 two flute003"
+MS,11.667,5.833
+JS,35.000,17.500
 VD,,,&WASUNITS
 """
         )
         # auto-spindle with wait
         self.compare_multi( *gcode_in,
             "--toolchanger --no-comments --spindle-controller --wait-for-spindle 2 --no-header --no-show-editor",
-            """&WASUNITS=%(25)
+            """SA
+&WASUNITS=%(25)
 VD,,,1
+&Tool=1
+C9 'toolchanger
+&ToolName="T1 1/8 two flute002"
+MS,11.667,5.833
+JS,35.000,17.500
 &Tool=2
 C9 'toolchanger
-&ToolName="2"
+&ToolName="T3 Fly Cutter"
+MS,11.667,5.833
+JS,35.000,17.500
 TR,3000
 C6 'spindle-controller
 PAUSE 2
 &Tool=3
 C9 'toolchanger
-&ToolName="3"
+&ToolName="T2 1/8 two flute003"
+MS,11.667,5.833
+JS,35.000,17.500
 VD,,,&WASUNITS
 """
         )

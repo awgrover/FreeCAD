@@ -133,6 +133,7 @@ class Refactored_Opensbp(PostProcessor):
 
     def init_values(self, values: Values) -> None:
         """Initialize values that are used throughout the postprocessor."""
+        print(f"### Init .values")
         #
         PostUtilsArguments.init_shared_values(values)
         #
@@ -164,7 +165,9 @@ class Refactored_Opensbp(PostProcessor):
             'USE_TLO' : False,
             'line_number' : 1,
             'SKIP_UNKNOWN' : [], # --skip-unknown
+            'first_tool' : True,
         })
+        print(f"### .values['SPINDLE_WAIT'] {self.values['SPINDLE_WAIT']}")
 
 
     def init_argument_defaults(self, argument_defaults: Defaults) -> None:
@@ -306,6 +309,8 @@ class Refactored_Opensbp(PostProcessor):
                 'SHOW_MACHINE_UNITS' : True, # we have to set the machine
                 'AXIS_PRECISION' : 5, # we do calculations, so more precision to prevent rounding errors
                 'FEED_PRECISION' : 5,
+                'first_tool' : True, # per section, i.e. per file, i.e. per-run
+                'SPINDLE_WAIT' : 0, # we'll to the logic in the right place later
             })
             try:
                 # We get back a processed (expanded) set of gcode
@@ -338,6 +343,7 @@ class Refactored_Opensbp(PostProcessor):
         flag: bool
 
         Path.Log.debug("Exporting the job")
+        self.reinitialize()
 
         (flag, args) = self.process_arguments()
         #
@@ -631,23 +637,37 @@ class ToOpenSBP:
     def t_toolchange(self, path_command):
         if self.post.values['OUTPUT_TOOL_CHANGE']:
             tool_number = int(path_command.Parameters['T'])
+            if len(self.post._job.Tools.Group) < tool_number:
+                raise ValueError(f"Toolchange with non-existent tool_number {tool_number} at {self.location(path_command)}")
+
             tool_controller = self.post._job.Tools.Group[ tool_number - 1 ]
             tool_name = f"{tool_controller.Label}, {tool_controller.Tool.Label}" # not sure if we want both .Label's, just trying to help the operator
             safe_tool_name = re.sub(r'[^A-Za-z0-9/_ .-]', '', tool_name)
 
             if self.post.arguments.toolchanger:
+                # automatic, no prompt
                 rez = [
                     f"&Tool={tool_number}",
                     "C9 'toolchanger",
                     f'&ToolName="{safe_tool_name}"', 
                 ]
             else:
+                # Manual, Prompt (on second)
                 rez = [
                     f"&Tool={tool_number}",
-                    f"'Change tool to #{tool_number}: {tool_name}", # prompt
-                    "PAUSE", # causes a modal-dialog to show message and ask "ok?"
-                    f'&ToolName="{safe_tool_name}"', 
+                    self.comment(f"Change tool to #{tool_number}: {tool_name}", force=True).rstrip(), # prompt
                 ]
+                print(f"### change #{tool_number}: {tool_name}")
+                if self.post.values['first_tool']:
+                    print(f"### first_tool")
+                    rez.append( self.comment(f"First change tool, should already be #{tool_number}: {tool_name}", force=True).rstrip() )
+                    self.post.values['first_tool'] = False
+                else:
+                    print(f"### nth_tool")
+                    # assumes the first tool is installed when doing manual tool-change
+                    # causes a modal-dialog to show message and ask "ok?"
+                    rez.append( "PAUSE" )
+                rez.append( f'&ToolName="{safe_tool_name}"' )
                 
             rez = nl.join(rez) + nl
         else:
@@ -715,6 +735,23 @@ class ToOpenSBP:
         print(f"### move\n{rez}###")
 
         return rez
+
+    @gcode("M03") # clockwise only. do the spindle-controlers do CCW?
+    def t_spindle_speed(self, path_command):
+        native = ''
+
+        native += f"TR,{int(path_command.Parameters['S'])}\n" # rpm units
+
+        if self.post.arguments.spindle_controller:
+            # stop, I think:
+            native += "C6 'spindle-controller\n"
+            if self.post.values['SPINDLE_WAIT'] > 0:
+                native += f"PAUSE {int(self.post.values['SPINDLE_WAIT'])}\n"
+        else:
+            native += f"'Change spindle speed to {int(path_command.Parameters['S'])}\n" # prompt
+            native += "PAUSE\n" # causes a modal to ask "ok?"
+
+        return native
 
     def set_speed( self, path_command, feed_rate ):
         # For non-rapid, F applies to the vector of all the axis
