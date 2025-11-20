@@ -39,6 +39,11 @@ Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
 Path.Log.trackModule(Path.Log.thisModule())
 
 
+# for testing, the tool is set to:
+FeedSpeed = 700 # mm/min
+RapidSpeed = FeedSpeed * 3
+# verticals are /2
+
 class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
     """NB: the post-processor has globals,
         which are not reset for each .assertX,
@@ -64,16 +69,17 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         # we only fixup the first tool-controller for feed rates
         # but we setup setupsheet which will get all the tools for rapid
         tool_controller = cls.job.Tools.Group[0]
-        base_speed = 700
+
+        # shopbot native is mm/s, freecad is mm/min
         if tool_controller.HorizFeed.Value == 0.0:
-            tool_controller.HorizFeed = Units.Quantity(base_speed, "mm/min")
+            tool_controller.HorizFeed = Units.Quantity(FeedSpeed, "mm/min")
         if tool_controller.VertFeed.Value == 0.0:
-            tool_controller.VertFeed = Units.Quantity(base_speed/2, "mm/min")
+            tool_controller.VertFeed = Units.Quantity(FeedSpeed/2, "mm/min")
         setup_sheet = cls.job.SetupSheet
         if setup_sheet.HorizRapid.Value == 0.0:
-            setup_sheet.HorizRapid = Units.Quantity(base_speed * 3, "mm/min")
+            setup_sheet.HorizRapid = Units.Quantity(RapidSpeed, "mm/min")
         if setup_sheet.VertRapid.Value == 0.0:
-            setup_sheet.VertRapid = Units.Quantity((base_speed *3)/2, "mm/min")
+            setup_sheet.VertRapid = Units.Quantity(RapidSpeed/2, "mm/min")
         cls.doc.recompute()
         #settings = { p:getattr(tool_controller, p) for p in ['HorizFeed','VertFeed','HorizRapid','VertRapid'] }
         #print(f"### tc setup {settings}")
@@ -163,7 +169,7 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         self.profile_op.Path = Path.Path([])
 
         # Test generating with header
-        # Header contains a time stamp that messes up unit testing.
+        # Header contains a time stamp that messes up diff.
         self.compare_multi( None,
             "--no-show-editor",
             """'(Exported by FreeCAD)
@@ -178,12 +184,12 @@ SA
 'Units metric
 VD,,,1
 '(Begin operation: Fixture)
-'(Machine units: mm/min)
+'(Machine units: mm/s)
 '(Path: Fixture)
 '( G54 )
 '(Finish operation: Fixture)
 '(Begin operation: TC: Default Tool)
-'(Machine units: mm/min)
+'(Machine units: mm/s)
 '(Path: TC: Default Tool)
 '(TC: Default Tool)
 '(Begin toolchange)
@@ -192,11 +198,11 @@ VD,,,1
 PAUSE
 &ToolName="TC Default Tool Endmill"
 'set speeds: TC: Default Tool
-MS,700.000,350.000
-JS,2100.000,1050.000
+MS,11.667,5.833
+JS,35.000,17.500
 '(Finish operation: TC: Default Tool)
 '(Begin operation: Profile)
-'(Machine units: mm/min)
+'(Machine units: mm/s)
 '(Path: Profile)
 '(Finish operation: Profile)
 '(Begin postamble)
@@ -217,14 +223,15 @@ VD,,,1
 'Change tool to #1: TC: Default Tool, Endmill
 PAUSE
 &ToolName="TC Default Tool Endmill"
-MS,700.000,350.000
-JS,2100.000,1050.000
+MS,11.667,5.833
+JS,35.000,17.500
 VD,,,&WASUNITS
 """
         )
 
-    def wrap(self, expected, inches=None):
-        # wraps in std prefix, postfix for no-comments, no-header
+    def wrap(self, expected, inches=None, preamble=''):
+        # compare_multi helper
+        # wraps the expected path-gcode in std prefix, postfix for no-comments, no-header
 
         # hack'ish: adapt to precision
         if m := re.search(r'\.(\d+)', expected):
@@ -232,17 +239,19 @@ VD,,,&WASUNITS
         else:
             z = '0' * 3
 
+        fmt = lambda v : format(v, f"0.{len(z)}f")
+
+        # remember we are x/s and freecad is x/min (usually)
         if inches:
             vd = '0'
-            fmt = lambda v : format(v, f"0.{len(z)}f")
-            speeds=f"""MS,{fmt(27.5591)},{fmt(13.7795)}
-JS,{fmt(82.6772)},{fmt(41.3386)}"""
+            speeds=f"""MS,{fmt(FeedSpeed/60/25.4)},{fmt(FeedSpeed/2/60/25.4)}
+JS,{fmt(RapidSpeed/60/25.4)},{fmt(RapidSpeed/2/60/25.4)}"""
         else:
             vd = '1'
-            speeds=f"""MS,700.{z},350.{z}
-JS,2100.{z},1050.{z}"""
+            speeds=f"""MS,{fmt(FeedSpeed/60)},{fmt(FeedSpeed/2/60)}
+JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
 
-        return f"""SA
+        return f"""{preamble}SA
 &WASUNITS=%(25)
 VD,,,{vd}
 &Tool=1
@@ -250,8 +259,7 @@ VD,,,{vd}
 PAUSE
 &ToolName="TC Default Tool Endmill"
 {speeds}
-{expected.rstrip()}
-VD,,,&WASUNITS
+{expected}VD,,,&WASUNITS
 """
 
     def test010(self):
@@ -281,6 +289,7 @@ VD,,,&WASUNITS
             self.wrap("""J3,0.3937,0.7874,1.1811
 """, 'inches'),
         )
+
         self.compare_multi(
             "G0 X10 Y20 Z30",
             "--no-header --no-comments --inches --precision=2 --no-show-editor",
@@ -290,7 +299,7 @@ VD,,,&WASUNITS
 
     def test015(self):
         """
-        Test precision with G1, which generates MS commands
+        Test precision, and units, with G1, which generates MS commands
         """
         f = 700.0 / 60.0 # mm/s
 
@@ -329,22 +338,33 @@ M3,0.39,0.79,1.18
     def test020(self):
         """Test single access vs speed"""
 
-        f = 700.0 / 60.0 # mm/s
+        f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
 
         # one axis: X
         self.compare_multi(
             f"G1 F{f} X10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap("""MS,700.000
+            self.wrap(f"""MS,{f}
 MX,10.000
 """)
         )
+
+        # one axis: y
+        self.compare_multi(
+            f"G1 F{f} Y10",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap(f"""MS,{f}
+M2,,10.000
+""")
+        )
+
+        # 
 
         # one axis: Z
         self.compare_multi(
             f"G1 F{f} Z10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap("""MS,,700.000
+            self.wrap(f"""MS,,{f}
 M3,,,10.000
 """)
         )
@@ -354,7 +374,7 @@ M3,,,10.000
         self.compare_multi(
             f"G1 F{f} X10 Y0 Z0",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap("""MS,700.000
+            self.wrap(f"""MS,{f}
 M3,10.000,0.000,0.000
 """)
         )
@@ -364,14 +384,16 @@ M3,10.000,0.000,0.000
         Test Pre-amble
         """
 
-        self.job.Path = Path.Path([])
-        postables = [self.job]
+        f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
 
-        self.compare_multi(None,
-            "--no-header --no-comments --preamble='G0 Z50\nG1 X20' --no-show-editor --metric",
-            """JZ,50.000
+        # preamble values are verbatim, not unit converted!
+        self.compare_multi(
+            "(none)",
+            f"--no-header --no-comments --preamble='G0 Z50\nG1 F700 X20' --no-show-editor --metric",
+            self.wrap("", preamble="""J3,,,50.000
+MS,700.000
 MX,20.000
-"""
+""")
         )
 
     def test040(self):

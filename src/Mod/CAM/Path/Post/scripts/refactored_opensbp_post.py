@@ -263,6 +263,7 @@ class Refactored_Opensbp(PostProcessor):
             # Update any variables that might have been modified while processing the arguments.
             #
             self._units = self.values["UNITS"]
+            self.values['UNIT_SPEED_FORMAT'] = 'mm/s' if self.values['UNIT_FORMAT']=='mm' else 'in/s'
         #
         # If the flag is False, then args is either None (indicating an error while
         # processing the arguments) or a string containing the argument list formatted
@@ -342,6 +343,7 @@ class Refactored_Opensbp(PostProcessor):
         #
         if flag:
             self.arguments = args
+            print(f"### cli args {self._job.PostProcessorArgs}")
             print(f"### argparsed {args}")
             return self.process_postables()
         #
@@ -601,6 +603,7 @@ class ToOpenSBP:
         if self.set_units:
             raise ValueError("You can only set the units once, already {self.set_units['command']} at {self.set_units['at']}. You tried again at {self.location(path_command)}")
         else:
+            print(f"### G2x post.values {self.post.values}")
             self.set_units = { 'command' : path_command.Name, 'at' : self.location() }
             rez = [
                 "&WASUNITS=%(25)",
@@ -779,7 +782,7 @@ class ToOpenSBP:
 
         if tool_controller.HorizFeed != 0.0:
             speeds['has_ms'] += 2
-            print(f"### setspeed tc horizf {tool_controller.HorizFeed.__class__.__name__}")
+            print(f"### setspeed tc horizf {tool_controller.HorizFeed}")
 
             xy = PostUtilsParse.format_for_feed(self.post.values, tool_controller.HorizFeed)
             speeds['ms'].append( xy )
@@ -803,6 +806,7 @@ class ToOpenSBP:
 
         if tool_controller.HorizRapid != 0.0:
             speeds['has_js'] += 2
+            print(f"### setspeed tc horizR {tool_controller.HorizRapid}")
             xy = PostUtilsParse.format_for_feed(self.post.values, tool_controller.HorizRapid )
             speeds['js'].append( xy )
         else:
