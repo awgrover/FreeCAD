@@ -226,8 +226,7 @@ class Refactored_Opensbp(PostProcessor):
         )
         # parser.add_argument("--o1", action="store_true", help='turns on optimizations that wouldn't break if you interrupt the execution and did some command manually.') # no such optimizations at this time
         # These optimizations assume that you don't interrupt execution to insert a manual command (e.g. imagine a MS 400; and MX,1. which would break all the modal assumptions)
-        _parser.add_argument("--o2", action="store_true", help='turns on --modal --axis-modal --speed-modal')
-        _parser.add_argument("--speed-modal", action=argparse.BooleanOptionalAction, help="Shorten output when speed-values don't change", default=False)
+        _parser.add_argument("--o2", action="store_true", help='turns on --modal --axis-modal')
         _parser.add_argument(
             # this should probably be True for most shopbot installations
             "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
@@ -235,6 +234,7 @@ class Refactored_Opensbp(PostProcessor):
         _parser.add_argument("--filter","--filters", help="a ',' list of filters in FreeCAD.getUserMacroDir()/post to run on the gcode of each Path object, before we see it (i.e. cleanups). A class of same (camelcase) name as file, __init__(self,objectslist, filename, argstring), .filter(eachpathobj, its-.Commands) -> gcode")
         _parser.add_argument("--abort-on-unknown", action=argparse.BooleanOptionalAction, help="Generate an error and fail if an unknown gcode is seen. default=True", default=True)
         _parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, change them to a comment. E.g. --skip-unknown G55,G56")
+        _parser.add_argument("--native-rapid", action=argparse.BooleanOptionalAction, help="Use machine's rapid speeds, not the ToolController, default=--no-native-rapid", default=False)
         _parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
         _parser.add_argument("--spindle-controller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
         _parser.add_argument("--gcode-comments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
@@ -652,14 +652,13 @@ class ToOpenSBP:
         """Oh boy.
         opensbp specifies the xy speed, and Z speed separately for a motion.
         e.g. a "MS,sxy,sz" then a "M3,x,y,z".
-        Gcode has a F which the speed of the vector
-        and, for rapid, it's whatever-the-machine-setting-is.
+        But, gcode has a F which the speed of the vector
+        (for rapid, it's whatever-the-machine-setting-is).
         FreeCAD has horizontal speed (xy), and vertical speed (z),
-        which it uses to calculate F, (and a rapid horiz & vert speed).
-        And, we should respect the Rapid speeds, 
-        We pull rapid at set_initial_speed() time for each tool-change.
-        Finally, we have to take the delta(x,y,z) vector and project the F (or rapid) speed onto xy, and z
-        to generate the MS or JS command before each move command.
+        which it uses to calculate F,
+        (we already set rapid at set_initial_speed() time for each tool-change).
+        Finally, we have to take the delta(x,y,z) vector and project the F speed onto xy, and z
+        to generate the MS command before each move command.
         The Mx or Jx just uses the axis distances.
         """
         rez = ''
@@ -701,6 +700,7 @@ class ToOpenSBP:
         # For non-rapid, F applies to the vector of all the axis
         # For rapid, full speed on the axis from the toolchange settings
         #   (so no output here)
+
         native_command = None
         if path_command.Name == "G00":
             native_command = 'JS'
@@ -740,6 +740,7 @@ class ToOpenSBP:
             if f is None:
                 raise ValueError(f"No previous F speed at {self.location(path_command)}")
             
+            # FIXME: AB not handled yet
             speeds = [ (f * d/distance) for d in distances_for_speed ]
 
         speeds = [ format(s, f'.{self.post.values["AXIS_PRECISION"]}f') for s in speeds ]
@@ -804,7 +805,8 @@ class ToOpenSBP:
             speeds['js'].append('')
             native += self.comment("no VertRapid", force=True)
 
-        if speeds['has_js'] > 0:
+        # don't use Tool's Rapid if --no-native-rapid
+        if speeds['has_js'] > 0 and not self.post.arguments.native_rapid:
             native += "JS," + ','.join( speeds['js'] ) + "\n"
             self.current_location['JSXY'] = float(speeds['js'][0])
             self.current_location['JSZ'] = float(speeds['js'][1])
