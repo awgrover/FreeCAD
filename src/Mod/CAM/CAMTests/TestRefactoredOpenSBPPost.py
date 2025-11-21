@@ -208,7 +208,7 @@ VD,,,1
 '(Begin toolchange)
 &Tool=1
 'Change tool to #1: TC: Default Tool, Endmill
-PAUSE
+'First change tool, should already be #1: TC: Default Tool, Endmill
 &ToolName="TC Default Tool Endmill"
 'set speeds: TC: Default Tool
 MS,11.667,5.833
@@ -234,7 +234,7 @@ VD,,,&WASUNITS
 VD,,,1
 &Tool=1
 'Change tool to #1: TC: Default Tool, Endmill
-PAUSE
+'First change tool, should already be #1: TC: Default Tool, Endmill
 &ToolName="TC Default Tool Endmill"
 MS,11.667,5.833
 JS,35.000,17.500
@@ -314,13 +314,14 @@ VD,,,{vd}
         """
         Test precision, and units, with G1, which generates MS commands
         """
-        f = 700.0 / 60.0 # mm/s
+        f = FeedSpeed / 60.0 # mm/s
+        fmt = lambda v : format(v, f"0.3f")
 
         # default is metric-mm (internal default)
         self.compare_multi(
-            f"G1 F{f} X10 Y20 Z30", # simple rapid
+            f"G1 F{f} X10 Y20 Z30", # simple cut
             "--no-header --no-comments --no-show-editor --metric --no-abort-on-unknown",
-            self.wrap("""MS,418.330,561.249
+            self.wrap(f"""MS,6.972,9.354
 M3,10.000,20.000,30.000
 """),
         )
@@ -328,7 +329,7 @@ M3,10.000,20.000,30.000
         self.compare_multi(
             f"G1 F{f} X10 Y20 Z30",
             "--no-header --no-comments --precision=2 --no-show-editor",
-            self.wrap("""MS,418.33,561.25
+            self.wrap("""MS,6.97,9.35
 M3,10.00,20.00,30.00
 """),
         )
@@ -336,14 +337,14 @@ M3,10.00,20.00,30.00
         self.compare_multi(
             f"G1 F{f} X10 Y20 Z30",
             "--no-header --no-comments --inches --no-show-editor",
-            self.wrap("""MS,16.4697,22.0964
+            self.wrap("""MS,0.2745,0.3683
 M3,0.3937,0.7874,1.1811
 """, 'inches'),
         )
         self.compare_multi(
             f"G1 F{f} X10 Y20 Z30",
             "--no-header --no-comments --inches --precision=2 --no-show-editor",
-            self.wrap("""MS,16.47,22.10
+            self.wrap("""MS,0.27,0.37
 M3,0.39,0.79,1.18
 """, 'inches')
         )
