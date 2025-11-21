@@ -649,18 +649,19 @@ VD,,,&WASUNITS
     def test100(self):
         """Test A, B axis output for values between 0 and 90 degrees"""
         self.compare_multi(
-            "G1 X10 Y20 Z30 A40 B50",
+            f"G1 F{FeedSpeed} X10 Y20 Z30 A40 B50",
             "--no-header --no-comments --no-show-editor",
-            self.wrap("M5,10.000,20.000,30.000,40.000,50.000"),
+            self.wrap("""MS,211.058,283.164
+M5,10.000,20.000,30.000,40.000,50.000
+"""),
         )
+
         self.compare_multi(
-            "G1 X10 Y20 Z30 A40 B50",
+            f"G1 F{FeedSpeed} X10 Y20 Z30 A40 B50",
             "--no-header --no-comments --inches --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,0
+            self.wrap("""MS,0.3788,0.5082
 M5,0.3937,0.7874,1.1811,40.0000,50.0000
-VD,,,&WASUNITS
-"""
+""", 'inches')
         )
 
     def test105(self):
