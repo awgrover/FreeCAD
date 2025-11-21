@@ -242,7 +242,7 @@ VD,,,&WASUNITS
 """
         )
 
-    def wrap(self, expected, inches=None, preamble='', postamble=''):
+    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre=''):
         # compare_multi helper
         # wraps the expected path-gcode in std prefix, postfix for no-comments, no-header
 
@@ -267,7 +267,7 @@ JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
         return f"""{preamble}SA
 &WASUNITS=%(25)
 VD,,,{vd}
-&Tool=1
+{nativepre}&Tool=1
 'Change tool to #1: TC: Default Tool, Endmill
 'First change tool, should already be #1: TC: Default Tool, Endmill
 &ToolName="TC Default Tool Endmill"
@@ -869,16 +869,14 @@ J3,1.000,2.000,3.000
     def test220(self):
         """Test native-pre/postamble"""
 
-        # return-to is before postamble
-        self.compare_multi("",
-            "--no-comments --postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim-post' --native-preamble 'verbatim-pre' --no-header --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-verbatim-pre
-J3,1.000,2.000,3.000
-VD,,,&WASUNITS
+        self.compare_multi(
+            "(none)",
+            "--no-comments --postamble 'G0 X1 Y2 Z3' --native-postamble 'verbatim-post' --preamble 'G0 X4 Y5 Z6' --native-preamble 'verbatim-pre' --no-header --no-show-editor",
+            self.wrap("""J3,1.000,2.000,3.000
 verbatim-post
-"""
+""", 
+            preamble="J3,4.000,5.000,6.000\n",
+            nativepre="verbatim-pre\n")
         )
 
     def test240(self):
