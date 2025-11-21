@@ -269,7 +269,7 @@ JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
 VD,,,{vd}
 &Tool=1
 'Change tool to #1: TC: Default Tool, Endmill
-PAUSE
+'First change tool, should already be #1: TC: Default Tool, Endmill
 &ToolName="TC Default Tool Endmill"
 {speeds}
 {expected}{postamble}VD,,,&WASUNITS
@@ -605,32 +605,42 @@ VD,,,&WASUNITS
         Test comment
         """
 
-        # we've always been no-comments default
         self.compare_multi( "(comment)",
             "--no-header --no-comments --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-VD,,,&WASUNITS
-"""
+            self.wrap("")
         )
 
         self.compare_multi( "(comment)",
-            "--no-header --no-comments --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
+            "--no-header --comments --no-show-editor",
+            """'(Begin preamble)
+SA
 &WASUNITS=%(25)
+'Units metric
 VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
-'comment
-'(finish operation: testpath)
-VD,,,&WASUNITS
-"""
-        )
-
-        self.compare_multi( "(comment)",
-            "--no-header --no-comments --no-comments --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
+'(Begin operation: Fixture)
+'(Machine units: mm/s)
+'(Path: Fixture)
+'( G54 )
+'(Finish operation: Fixture)
+'(Begin operation: TC: Default Tool)
+'(Machine units: mm/s)
+'(Path: TC: Default Tool)
+'(TC: Default Tool)
+'(Begin toolchange)
+&Tool=1
+'Change tool to #1: TC: Default Tool, Endmill
+'First change tool, should already be #1: TC: Default Tool, Endmill
+&ToolName="TC Default Tool Endmill"
+'set speeds: TC: Default Tool
+MS,11.667,5.833
+JS,35.000,17.500
+'(Finish operation: TC: Default Tool)
+'(Begin operation: Profile)
+'(Machine units: mm/s)
+'(Path: Profile)
+'(comment)
+'(Finish operation: Profile)
+'(Begin postamble)
 VD,,,&WASUNITS
 """
         )
