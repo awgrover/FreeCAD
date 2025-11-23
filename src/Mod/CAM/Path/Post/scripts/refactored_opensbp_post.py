@@ -76,6 +76,7 @@ class Refactored_Opensbp(PostProcessor):
     * This always sets the ShopBot app/machine units (see --inches --metric), no more mismatches. This defaults to your document's units.
     * G54 (fixture/coordinate-system) is accepted, but is a noop (because it's the default in Operations). Others (G55 etc) are not-accepted.
     * This does arc gcodes (G02 and G03), so helical operations should work.
+    * Relative movement (G91) is not supported.
     * Like most post-processors, we accept single-digit gcodes like G1, and treat them as if they were canonical 2 digit, like G01.
     * opensbp commands can be in-lined with a comment:
             (MC_RUN_COMMAND: <opensbpcommand>)
@@ -595,8 +596,8 @@ class ToOpenSBP:
         """a message fragment of where we are, and the path_command if you want
             `path_command` can be a literal-string gcode, or usually a Path.Command
         """
-        g = f": {path_command if isinstance(path_command, str) else path_command.toGCode()}" if path_command else ''
-        return f"[{self.post.values['line_number']}] in {self.post.values['Operation']}{g}"
+        g = f": {self.post.values['line_number']} {path_command if isinstance(path_command, str) else path_command.toGCode()}" if path_command else ''
+        return f"{self.post.values['Operation']}{g}"
 
     def comment(self, message, force=False):
         """if OUTPUT_COMMENTS, then generate the comment, 
@@ -651,6 +652,7 @@ class ToOpenSBP:
 
     @gcode('G90') # no relative (G91) yet, have to fix modal handling for relative
     def t_absolute_mode(self, path_command):
+        self.post.values['MOTION_MODE'] = path_command.Name
         return { 'G90':'SA', 'G91':'SR' }[ path_command.Name ] + nl
 
     @gcode('M06')
@@ -773,6 +775,113 @@ class ToOpenSBP:
 
         return native
 
+    @gcode("G02","G03")
+    def t_arc(self, path_command):
+        # only center-format: IJ
+        # only absolute mode
+        # only xy plane
+        # only P1 (or no P)
+        # cases:
+        #   current-position is start
+        #   Z causes helical-arc
+        #   Pn causes arc-as-defined + (n-1) whole circles: not handled
+        #   XY is the end-position for a segment
+        #   none of XY means whole circle
+        #   IJ is the location of the arc-center: an offset. at least one of is required
+        #   F is required
+
+        print(f"### arc params {path_command.Parameters}")
+        # we would have to generate multiple CG's for repetitions (P)
+        handled_parameters = 'XYZIJFPK' # notably, not R
+
+        not_handled = []
+        not_handled = [ a for a in path_command.Parameters if a not in handled_parameters ]
+        # we handle K=0.0 by ignoring it (xy-plane), other K's we don't handle
+        if 'K' in path_command.Parameters and path_command.Parameters['K'] != 0.0:
+            not_handled.append('K')
+        if 'P' in path_command.Parameters and path_command.Parameters['P'] != 1:
+            not_handled.append('P')
+        if not_handled:
+            message = f"We can't do parameters {not_handled} for an arc in {self.location(path_command)}"
+            FreeCAD.Console.PrintError(message)
+            if self.post.arguments.abort_on_unknown:
+                raise ValueError(message)
+            else:
+                return ''
+
+        if 'F' not in path_command.Parameters:
+            message = f"'F' parameter (feed-speed) is required for an arc in {self.location(path_command)}"
+            FreeCAD.Console.PrintError(message)
+            raise ValueError(message)
+
+        if self.post.values['MOTION_MODE'] != 'G90':
+            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
+            message = f"We can't do relative mode for arcs in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
+            FreeCAD.Console.PrintError(message)
+            if self.post.arguments.abort_on_unknown:
+                raise NotImplementedError(message)
+            else:
+                return ''
+
+        if path_command.Name == "G02":  # CW
+            dirstring = "1"
+        else:  # G3 means CCW
+            dirstring = "-1"
+        txt = ""
+
+        axis = [ path_command.Parameters.get(a,None) for a in self.PositionAxis ]
+
+        dz, speed_command = self.set_speed( path_command, path_command.Parameters['F'] )
+        txt += speed_command
+
+        txt += "CG,"
+        txt += "," # no diameter
+        # end
+        if 'X' not in path_command.Parameters and 'Y' not in path_command.Parameters:
+            # circle
+            txt += ","
+            txt += ","
+        else:
+            # segment
+            txt += format(path_command.Parameters["X"], f".{self.post.values['FEED_PRECISION']}f") + ","
+            txt += format(path_command.Parameters["Y"], f".{self.post.values['FEED_PRECISION']}f") + ","
+        # Center is at offset:
+        txt += format(path_command.Parameters["I"] if 'I' in path_command.Parameters.keys() else 0.0, f".{self.post.values['FEED_PRECISION']}f")  + ","
+        txt += format(path_command.Parameters["J"] if 'J' in path_command.Parameters.keys() else 0.0, f".{self.post.values['FEED_PRECISION']}f")  + ","
+        txt += "T" + "," # move on diameter
+        txt += dirstring + ","
+
+        if 'Z' in path_command.Parameters:
+            # Z causes a helical, "causes the defined plunge to be made gradually as the cutter is circling down"
+            txt += format(dz, f".{self.post.values['FEED_PRECISION']}f") + ","
+        else:
+            txt += "0,"
+
+        txt += "," # repetitions
+        txt += "," # proportion-x
+        txt += "," # proportion-y
+        if 'Z' in path_command.Parameters:
+            # helical cases
+            # we don't do "bottom pass" (4) because FreeCAD seems to do that and it's not a g-code thing anyway
+            if 'X' not in path_command.Parameters and 'Y' not in path_command.Parameters:
+                # circle
+                feature = 3 # spiral
+            else:
+                feature = 3 # spiral
+        else:
+            feature = 0
+
+        txt += f"{feature},"
+        txt += "1," # continue the CG plunging (don't pull up)
+        txt += "0" # no move before plunge
+
+        # actual Z, opensbp plunge is a delta, note the actual Z as a comment
+        if 'Z' in path_command.Parameters:
+            txt += " ' Z" + format(path_command.Parameters["Z"], f".{self.post.values['FEED_PRECISION']}f")
+        txt += self.comment(path_command).rstrip()
+        txt += "\n"
+        return txt
+
     def set_speed( self, path_command, feed_rate ):
         # For non-rapid, F applies to the vector of all the axis
         # For rapid, full speed on the axis from the toolchange settings
@@ -794,20 +903,82 @@ class ToOpenSBP:
         print(f"### end {self.end_location}")
         print(f"### end {fmt_diff(self.end_location)}")
 
-        d_axis = list(map(operator.sub, self.end_location, last_position))
-        print(f"### d_axis {fmt_diff(d_axis)}")
-        squared_d_axis = [ v**2 for v in d_axis]
-        distance = math.sqrt( sum( squared_d_axis ) )
-        xy_distance = math.sqrt( sum( squared_d_axis[:2] ) )
-        distances_for_speed = [ xy_distance, d_axis[2] ] # xy, z
+        # Linear move
+        if path_command.Name == 'G01':
+            d_axis = list(map(operator.sub, self.end_location, last_position))
+            print(f"### d_axis {fmt_diff(d_axis)}")
+            squared_d_axis = [ v**2 for v in d_axis]
+            distance = math.sqrt( sum( squared_d_axis ) )
+            z_distance = d_axis[2]
+            xy_distance = math.sqrt( sum( squared_d_axis[:2] ) )
+            axis = [ a for a in self.PositionAxis if a in path_command.Parameters ]
+
+        # Arcs
+        elif path_command.Name in ['G02','G03']:
+            def arc_length_3d(center, start, end, clockwise):
+                """
+                center, start, end: (x, y, z) tuples
+                clockwise: True for G2, False for G3
+                Returns the true 3D arc length.
+                """
+
+                cx, cy, cz = center
+                sx, sy, sz = start
+                ex, ey, ez = end
+
+                # ---- linear Z interpolation ----
+                dz = ez - sz
+
+                # ---- XY arc angle ----
+                r = math.hypot(sx - cx, sy - cy)
+
+                a0 = math.atan2(sy - cy, sx - cx)
+                a1 = math.atan2(ey - cy, ex - cx)
+
+                dtheta = a1 - a0
+
+                if dtheta == 0:
+                    dtheta = 2 * math.pi
+                elif clockwise:
+                    if dtheta > 0:
+                        dtheta -= 2 * math.pi
+                else:
+                    if dtheta < 0:
+                        dtheta += 2 * math.pi
+                print(f"### dtheta {dtheta}")
+
+                arc_xy = abs(r * dtheta)
+
+                # ---- true helical arc length ----
+                return ( arc_xy, math.hypot(arc_xy, dz) )
+
+            start_position = [ float(self.current_location[a] or 0) for a in 'XYZ' ]
+            center_offset = [ float(path_command.Parameters.get(a,None) or 0) for a in 'IJK' ] # k always 0
+            end_position = [ float(path_command.Parameters.get(k, start_position[i])) for i,k in enumerate('XYZ') ]
+            z_distance = end_position[2] - start_position[2]
+
+            # If the XY is omitted, it means a whole circle, and arc-length-3d will give that
+            xy_distance, distance = arc_length_3d(
+                map(operator.add, start_position, center_offset), # center
+                start_position,
+                end_position,
+                path_command.Name=='G02' # clockwise?
+            )
+
+            axis = [ a for a in 'XYZ' ]
+
+        distances_for_speed = [ xy_distance, z_distance ]
         print(f"### dist {distance} d xy,z {distances_for_speed}")
 
         if path_command.Name == 'G00':
+            # see above, we don't get to here on G0
             # Rapid speed is the full speed on xy, and z
             # no projecting on to the vector
             # FIXME: AB not handled yet
             speeds = [ self.current_location['JSXY'], self.current_location['JSZ' ] ]
             print(f"### rapid_speeds {fmt_diff(speeds)}")
+
+        # feed motions
         else:
             f = path_command.Parameters.get('F', None)
             print(f"### command f {f}")
@@ -820,7 +991,6 @@ class ToOpenSBP:
             # FIXME: AB not handled yet
             speeds = [ (f * d/distance) for d in distances_for_speed ]
 
-        axis = [ a for a in self.PositionAxis if a in path_command.Parameters ]
         print(f"### set_speed axis {axis}")
 
         # elide 0's, since that means we aren't moving in that axis
@@ -829,7 +999,7 @@ class ToOpenSBP:
         # cleans up trailing , when trailing speeds elided
         cmd = f"{native_command},{','.join(speeds)}".rstrip(',')
         print(f"### cmd {cmd}")
-        return cmd + nl
+        return ( z_distance, cmd + nl )
 
     def set_initial_speeds(self, tool_controller, path_command):
         # need to ensure initial values for speeds
