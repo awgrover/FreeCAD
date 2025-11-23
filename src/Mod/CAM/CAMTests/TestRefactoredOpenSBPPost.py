@@ -146,7 +146,14 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         if args[0] is None:
             self.profile_op.Path = Path.Path([])
         elif isinstance(args[0],str):
-            self.profile_op.Path = Path.Path([ Path.Command(x) for x in args[:-2]])
+            try:
+                self.profile_op.Path = Path.Path([ Path.Command(x) for x in args[:-2]])
+            except ValueError as e:
+                try:
+                    for i,x in enumerate(args[:-2]):
+                        Path.Command(x)
+                except ValueError:
+                    raise ValueError(f"for [{i}] '{x}'") from e
         else:
             # assume Path.Commands
             self.profile_op.Path = Path.Path(args[:-2])
@@ -880,13 +887,16 @@ verbatim-post
         )
 
     def test240(self):
-        """Test relative & --modal"""
+        """Test relative & --modal
+        We don't do relative, we'd have to track position
+        """
 
         c = "G0 X10 Y20 Z30"
 
-        self.compare_multi( "G91", c, c, "G90", c, c,
-            "--no-header --no-comments --modal --no-show-editor",
-            """&WASUNITS=%(25)
+        with self.assertRaises(NotImplementedError) as context:
+            self.compare_multi( "G91", c, c, "G90", c, c,
+                "--no-header --no-comments --modal --no-show-editor",
+                """&WASUNITS=%(25)
 VD,,,1
 SR 'RELATIVE
 J3,10.000,20.000,30.000
@@ -895,52 +905,47 @@ SA 'ABSOLUTE
 J3,10.000,20.000,30.000
 VD,,,&WASUNITS
 """
-        )
+            )
+        self.assertTrue('gcode not handled' in str(context.exception))
 
     def test250(self):
         """Test G54"""
-
-        c = "G0 X10 Y20 Z30"
+        # G54 is already in the Job we are using, but, why not:
 
         self.compare_multi( "G54",
-            "--no-header --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
-&WASUNITS=%(25)
-VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
-'G54 has no effect
-'(finish operation: testpath)
-VD,,,&WASUNITS
-"""
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("")
         )
-    
+
     def test260(self):
         """Test Arc"""
  
         c = "G2 X10 Y20 Z40 I1 J2 F99"
 
+        # a few un-handled params
+        for bad in [ 'K2', 'P3', 'R1' ]:
+            with self.assertRaises(ValueError) as context:
+                self.compare_multi(f"G2 {bad} X10 Y20 Z40 I1 J2 F99", "--no-show-editor", "shoulld be no output")
+            self.assertIn(f"'{bad[0]}'",str(context.exception))
+
         self.compare_multi( 
-            "G0 Z5", # the CG plunge is relative, so start from non-0 to test
-            "G2 X10 Y20 Z40 I1 J2 F99", # helical segment
-            "G0 Z5",
-            "G2 Z40 I1 J2 F98", # helical circle
-            "G0 Z5",
-            "G2 X50 Y60 I1 J2 F89", # segment
+            "G0 Z5.00", # the CG plunge is relative, so start from non-0 to test
+            f"G2 F{FeedSpeed} X10 Y20 Z40 I1 J2", # helical segment
+            "G0 Z5.01",
+            f"G2 F{FeedSpeed-100} Z40.01 I1 J2", # helical circle
+            "G0 Z5.02",
+            f"G2 F{FeedSpeed-200} X50 Y60.02 I1 J2", # segment
             "--no-header --no-comments --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-JZ,5.000
-MS,99.000,99.000
+            self.wrap("""J3,,,5.000
+MS,137.749,686.313
 CG,,10.000,20.000,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.000
-JZ,5.000
-MS,98.000,98.000
-CG,,,,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.000
-JZ,5.000
-MS,89.000,
-CG,,50.000,60.000,1.000,2.000,T,1,0,,,,0,1,0
-VD,,,&WASUNITS
-"""
+J3,,,5.010
+MS,223.515,556.813
+CG,,,,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.010
+J3,,,5.020
+MS,500.000
+CG,,50.000,60.020,1.000,2.000,T,1,0,,,,0,1,0
+""")
         )
 
     def test270(self):
