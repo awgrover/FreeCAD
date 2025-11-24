@@ -169,6 +169,7 @@ class Refactored_Opensbp(PostProcessor):
             'line_number' : 1,
             'SKIP_UNKNOWN' : [], # --skip-unknown
             'first_tool' : True,
+            'last_command' : None,
         })
         print(f"### .values['SPINDLE_WAIT'] {self.values['SPINDLE_WAIT']}")
 
@@ -489,9 +490,12 @@ class ToOpenSBP:
                 ]
                 print(f"### end at {self.end_location}")
 
+            # handle that gcode
             print(f"### path_command is {path_command.__class__.__name__}")
             rez = self.dispatch( path_command )
             print(f"### translated: {rez.rstrip()}")
+
+            # append to buffer
             if self.post.values['MODAL'] and rez == last_native: # FIXME only true for absolute mode
                 print(f"### modal elided")
             else:
@@ -501,6 +505,8 @@ class ToOpenSBP:
             if path_command.Name in self.post.values['MOTION_COMMANDS']:
                 self.current_location.update(path_command.Parameters)
                 print(f"### current {self.current_location}")
+
+            self.post.values['last_command'] = path_command
             
         native += self.postfix()
 
@@ -580,9 +586,11 @@ class ToOpenSBP:
             path_command.Name = re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', path_command.Name)
             command = path_command.Name
 
+        # Call the translate handler
         if command in self.DispatchMap:
             rez = self.DispatchMap[command](self, path_command ) # careful, doesn't do inheritance lookup
             return rez
+
         else:
             message = f"gcode not handled at {self.location(path_command)}"
             if self.post.arguments.abort_on_unknown and command not in self.post.values['SKIP_UNKNOWN']:
@@ -615,6 +623,7 @@ class ToOpenSBP:
 
     @gcode('comment')
     def t_comment(self, path_command):
+        # leaves ()
         rez = ""
 
         rez += self.comment(path_command.Name)
@@ -740,7 +749,8 @@ class ToOpenSBP:
                     raise ValueError(f"Rapid moves (G0) can't have an F at {self.location(path_command)}")
 
         print(f"### move {path_command.Name} F {feed_rate}")
-        rez += self.set_speed( path_command, feed_rate )
+        dz, speed_command = self.set_speed( path_command, feed_rate )
+        rez += speed_command
 
         native_command = 'J' if path_command.Name == 'G00' else "M"
 
@@ -815,8 +825,8 @@ class ToOpenSBP:
             raise ValueError(message)
 
         if self.post.values['MOTION_MODE'] != 'G90':
-            opname = CurrentState['Operation'].Label if CurrentState['Operation'] else ''
-            message = f"We can't do relative mode for arcs in [{CurrentState['gcode_line_number']}] {opname} {command.toGCode()}"
+            opname = self.post.values['Operation'].Label if self.post.values['Operation'] else ''
+            message = f"We can't do relative mode for arcs in [{self.post.values['line_number']}] {opname} {command.toGCode()}"
             FreeCAD.Console.PrintError(message)
             if self.post.arguments.abort_on_unknown:
                 raise NotImplementedError(message)
@@ -882,6 +892,26 @@ class ToOpenSBP:
         txt += "\n"
         return txt
 
+    @gcode('M00')
+    def t_prompt(self, command):
+        # Prompt with "Continue?" and pause, wait for user-interaction
+        # If a comment precedes M00, that is used as the prompt (to emulate opensbp behavior)
+
+        txt = ''
+        if not self.post.values['last_command'].Name.startswith('('):
+            # default prompt
+            where = []
+            if self.post._job:
+                where.append( f"<{self.post._job.Label}>")
+            if self.post.values['Operation']:
+                where.append( f"<{self.post.values['Operation']}>" )
+            txt += self.comment(f"Continue {'.'.join(where)}?", force=True)
+        elif not self.post.values['OUTPUT_COMMENTS']:
+            # Force inclusion of that preceding comment as a prompt
+            txt += self.comment( self.post.values['last_command'].Name, force=True )
+        txt += "PAUSE\n"
+        return txt
+
     def set_speed( self, path_command, feed_rate ):
         # For non-rapid, F applies to the vector of all the axis
         # For rapid, full speed on the axis from the toolchange settings
@@ -892,7 +922,7 @@ class ToOpenSBP:
             native_command = 'JS'
             # Actually, we just use the full speed on xy and z axis
             # which was initialized at toolchange time
-            return ''
+            return (0,'')
         else:
             native_command = 'MS'
 

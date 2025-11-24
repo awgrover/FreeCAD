@@ -242,16 +242,17 @@ VD,,,1
 &Tool=1
 'Change tool to #1: TC: Default Tool, Endmill
 'First change tool, should already be #1: TC: Default Tool, Endmill
-&ToolName="TC Default Tool Endmill"
 MS,11.667,5.833
 JS,35.000,17.500
 VD,,,&WASUNITS
 """
         )
 
-    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre=''):
+    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre='', comments=False):
         # compare_multi helper
-        # wraps the expected path-gcode in std prefix, postfix for no-comments, no-header
+        # wraps the expected path-gcode in std prefix, postfix, no-header
+        # make `comments` match with --comments or --no-comments
+        # lots-o-fun special cases...
 
         # hack'ish: adapt to precision
         if m := re.search(r'\.(\d+)', expected):
@@ -262,24 +263,72 @@ VD,,,&WASUNITS
         fmt = lambda v : format(v, f"0.{len(z)}f")
 
         # remember we are x/s and freecad is x/min (usually)
+        speeds = ""
+        if comments:
+            speeds += "'set speeds: TC: Default Tool\n"
         if inches:
             vd = '0'
-            speeds=f"""MS,{fmt(FeedSpeed/60/25.4)},{fmt(FeedSpeed/2/60/25.4)}
+            speeds += f"""MS,{fmt(FeedSpeed/60/25.4)},{fmt(FeedSpeed/2/60/25.4)}
 JS,{fmt(RapidSpeed/60/25.4)},{fmt(RapidSpeed/2/60/25.4)}"""
         else:
             vd = '1'
-            speeds=f"""MS,{fmt(FeedSpeed/60)},{fmt(FeedSpeed/2/60)}
+            speeds += f"""MS,{fmt(FeedSpeed/60)},{fmt(FeedSpeed/2/60)}
 JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
 
-        return f"""{preamble}SA
+        def ifcomments(text):
+            if not comments:
+                # remove comment lines
+                # clean up multiple blank lines
+                # clean up leading \n
+                # clean up trailing \n and empty
+                text = re.sub(r"^'.+$", '', text, flags=re.MULTILINE)
+                text = re.sub(r'\n\n+', '\n', text)
+                text = re.sub(r'^\n', '', text)
+                if text != '' and not text.endswith("\n"):
+                    text += "\n" 
+                elif text == '\n':
+                    text = ''
+            return text
+
+        pre = [ f"""'(Begin preamble)
+{preamble}SA
 &WASUNITS=%(25)
-VD,,,{vd}
-{nativepre}&Tool=1
-'Change tool to #1: TC: Default Tool, Endmill
+{nativepre}'Units metric
+VD,,,1
+'(Begin operation: Fixture)
+'(Machine units: mm/s)
+'(Path: Fixture)
+'( G54 )
+'(Finish operation: Fixture)
+'(Begin operation: TC: Default Tool)
+'(Machine units: mm/s)
+'(Path: TC: Default Tool)
+'(TC: Default Tool)
+'(Begin toolchange)
+&Tool=1
+""",
+            # don't remove these comments
+            f"""'Change tool to #1: TC: Default Tool, Endmill
 'First change tool, should already be #1: TC: Default Tool, Endmill
 &ToolName="TC Default Tool Endmill"
-{speeds}
-{expected}{postamble}VD,,,&WASUNITS
+""",
+            f"""{speeds}
+'(Finish operation: TC: Default Tool)
+'(Begin operation: Profile)
+'(Machine units: mm/s)
+'(Path: Profile)
+"""
+        ]
+        pre[0] = ifcomments(pre[0])
+        pre[2] = ifcomments(pre[2])
+        pre = "".join(pre)
+
+        post = """'(Finish operation: Profile)
+'(Begin postamble)
+"""
+        post = ifcomments(post)
+
+        return f"""{pre}{expected}{post}{postamble}VD,,,&WASUNITS
 """
 
     def test010(self):
@@ -949,53 +998,36 @@ CG,,50.000,60.020,1.000,2.000,T,1,0,,,,0,1,0
         )
 
     def test270(self):
-        """Test M00 w/prompt (pause)"""
+        """Test M00 w/prompt (pause): dialog box"""
  
         self.compare_multi( 
             "(With Prompt)", "M0",
             "--no-header --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
-&WASUNITS=%(25)
-VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
-'With Prompt
+            self.wrap("""'(With Prompt)
 PAUSE
-'(finish operation: testpath)
-VD,,,&WASUNITS
-"""
+""", comments=True)
         )
 
         self.compare_multi( 
             # Include the preceding comment even if no-comments
             "(With Prompt)", "M0",
             "--no-header --no-comments --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,1
-'With Prompt
+            self.wrap("""'(With Prompt)
 PAUSE
-VD,,,&WASUNITS
-"""
+""")
         )
 
         self.compare_multi( 
-            "(Doesn't count as prompt)","G0 X0", "M0", # no prompt
+            "(Doesn't count as prompt)","G0 X0", "M0", # default prompt
             "--no-header --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
-&WASUNITS=%(25)
-VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
-'Doesn't count as prompt
+            self.wrap("""'(Doesn't count as prompt)
 JX,0.000
-'Continue?
+'Continue <Job>.<Profile>?
 PAUSE
-'(finish operation: testpath)
-VD,,,&WASUNITS
-"""
+""", comments=True)
         )
 
-    def test270(self): 
+    def test280(self): 
         """Test drilling"""
         self.maxDiff = 1024*1024
 
