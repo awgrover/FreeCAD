@@ -38,6 +38,7 @@ from Path.Post.Processor import PostProcessorFactory
 Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
 Path.Log.trackModule(Path.Log.thisModule())
 
+nl="\n"
 
 # for testing, the tool is set to:
 FeedSpeed = 700 # mm/min
@@ -172,83 +173,15 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         #print(f"### gcode {gcode}")
 
         if debug:
-            nl="\n"
             print(f"--------{nl}{gcode}--------{nl}")
         if remove:
-            expected = '\n'.join( (x for x in expected.split('\n') if not re.match(remove,x)) )
-            gcode =    nl.join((x for x in gcode.split(nl) if not re.match(remove,x)))
-        #print(f"###E---{expected}---")
+            expected = nl.join( (x for x in expected.split('\n') if not re.match(remove,x)) )
+            gcode =    nl.join( (x for x in gcode.split(nl)      if not re.match(remove,x)) )
+        print(f"###E---{expected}---")
         #print(f"###G---{gcode}---")
         self.assertEqual(expected, gcode) # most other tests have this reversed, and the diff reads wrong to me
 
-    def test000(self):
-        """Test Output Generation.
-        Empty path.  Produces only the preamble and postable.
-        """
-
-        self.profile_op.Path = Path.Path([])
-
-        # Test generating with header
-        # Header contains a time stamp that messes up diff.
-        self.compare_multi( None,
-            "--no-show-editor",
-            """'(Exported by FreeCAD)
-'(Post Processor: refactored_opensbp_post)
-'  --no-show-editor
-'(Cam File: boxtest.fcstd)
-'Job: Job
-'(Begin preamble)
-SA
-'(Output Time: this is removed
-&WASUNITS=%(25)
-'Units metric
-VD,,,1
-'(Begin operation: Fixture)
-'(Machine units: mm/s)
-'(Path: Fixture)
-'( G54 )
-'(Finish operation: Fixture)
-'(Begin operation: TC: Default Tool)
-'(Machine units: mm/s)
-'(Path: TC: Default Tool)
-'(TC: Default Tool)
-'(Begin toolchange)
-&Tool=1
-'Change tool to #1: TC: Default Tool, Endmill
-'First change tool, should already be #1: TC: Default Tool, Endmill
-&ToolName="TC Default Tool Endmill"
-'set speeds: TC: Default Tool
-MS,11.667,5.833
-JS,35.000,17.500
-'(Finish operation: TC: Default Tool)
-'(Begin operation: Profile)
-'(Machine units: mm/s)
-'(Path: Profile)
-'(Finish operation: Profile)
-'(Begin postamble)
-VD,,,&WASUNITS
-""",
-        remove=r"'\(Output Time:",
-        debug=True
-        )
-
-        # Test without header
-
-        self.compare_multi( None,
-            "--no-header --no-comments --no-show-editor",
-            """SA
-&WASUNITS=%(25)
-VD,,,1
-&Tool=1
-'Change tool to #1: TC: Default Tool, Endmill
-'First change tool, should already be #1: TC: Default Tool, Endmill
-MS,11.667,5.833
-JS,35.000,17.500
-VD,,,&WASUNITS
-"""
-        )
-
-    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre='', comments=False):
+    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre='', comments=False, header=False):
         # compare_multi helper
         # wraps the expected path-gcode in std prefix, postfix, no-header
         # make `comments` match with --comments or --no-comments
@@ -290,12 +223,20 @@ JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
                     text = ''
             return text
 
-        pre = [ f"""'(Begin preamble)
+        hdr = ""
+        if header:
+            hdr = """'(Exported by FreeCAD)
+'(Post Processor: refactored_opensbp_post)
+'  --no-show-editor
+'(Cam File: boxtest.fcstd)
+'Job: Job
+"""
+        pre = [ f"""{hdr}'(Begin preamble)
 {preamble}SA
 &WASUNITS=%(25)
-{nativepre}'Units metric
-VD,,,1
-'(Begin operation: Fixture)
+'Units metric
+VD,,,{0 if inches else 1}
+{nativepre}'(Begin operation: Fixture)
 '(Machine units: mm/s)
 '(Path: Fixture)
 '( G54 )
@@ -330,6 +271,64 @@ VD,,,1
 
         return f"""{pre}{expected}{post}{postamble}VD,,,&WASUNITS
 """
+
+    def test000(self):
+        """Test Output Generation.
+        Empty path.  Produces only the preamble and postable.
+        """
+
+        self.profile_op.Path = Path.Path([])
+
+        # Test generating with header
+        # Header contains a time stamp that messes up diff.
+        self.compare_multi( None,
+            "--no-show-editor",
+            self.wrap("", comments=True, header=True),
+            remove=r"'\(Output Time:",
+        )
+        """'(Exported by FreeCAD)
+'(Post Processor: refactored_opensbp_post)
+'  --no-show-editor
+'(Cam File: boxtest.fcstd)
+'Job: Job
+'(Begin preamble)
+SA
+'(Output Time: this is removed
+&WASUNITS=%(25)
+'Units metric
+VD,,,1
+'(Begin operation: Fixture)
+'(Machine units: mm/s)
+'(Path: Fixture)
+'( G54 )
+'(Finish operation: Fixture)
+'(Begin operation: TC: Default Tool)
+'(Machine units: mm/s)
+'(Path: TC: Default Tool)
+'(TC: Default Tool)
+'(Begin toolchange)
+&Tool=1
+'Change tool to #1: TC: Default Tool, Endmill
+'First change tool, should already be #1: TC: Default Tool, Endmill
+&ToolName="TC Default Tool Endmill"
+'set speeds: TC: Default Tool
+MS,11.667,5.833
+JS,35.000,17.500
+'(Finish operation: TC: Default Tool)
+'(Begin operation: Profile)
+'(Machine units: mm/s)
+'(Path: Profile)
+'(Finish operation: Profile)
+'(Begin postamble)
+VD,,,&WASUNITS
+"""
+
+        # Test without header
+
+        self.compare_multi( None,
+            "--no-header --no-comments --no-show-editor",
+            self.wrap("")
+        )
 
     def test010(self):
         """Test command Generation.
@@ -1035,11 +1034,7 @@ PAUSE
         self.compare_multi( 
             "G73 X1 Y2 Z0 R5 Q1.5 F123",
             "--no-header --comments --no-show-editor",
-            """'(use default machine units (document units were metric))
-&WASUNITS=%(25)
-VD,,,1
-'(begin operation: testpath)
-'(Path: testpath)
+            self.wrap("""
 'translate drill [1] G73 F123.000000 Q1.500000 R5.000000 X1.000000 Y2.000000 Z0.000000
 JZ,5.000
 J2,1.000,2.000
@@ -1061,6 +1056,6 @@ JZ,5.000
 'end translate drill [1] G73
 '(finish operation: testpath)
 VD,,,&WASUNITS
-""",
+"""),
         )
 
