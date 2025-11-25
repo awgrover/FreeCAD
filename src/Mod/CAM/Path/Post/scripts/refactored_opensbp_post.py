@@ -484,10 +484,18 @@ class ToOpenSBP:
                 native += self.comment( f"[{self.post.values['line_number']}] {path_command.toGCode()}" )
 
             if path_command.Name in self.post.values['MOTION_COMMANDS']:
-                self.end_location = [ 
-                    float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
-                    for a in self.current_location if a in self.PositionAxis 
-                ]
+                if self.post.values['MOTION_MODE'] == 'G90':
+                    self.end_location = [ 
+                        float(path_command.Parameters.get(a, self.current_location.get(a, 0.0)) or 0.0)
+                        for a in self.PositionAxis 
+                    ]
+                else:
+                    raise('bob')
+                    # FIXME: not tested (relative mode not fully implemented):
+                    self.end_location = [ 
+                        float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
+                        for a in self.current_location if a in self.PositionAxis 
+                    ]
                 print(f"### end at {self.end_location}")
 
             # handle that gcode
@@ -939,7 +947,7 @@ class ToOpenSBP:
             print(f"### d_axis {fmt_diff(d_axis)}")
             squared_d_axis = [ v**2 for v in d_axis]
             distance = math.sqrt( sum( squared_d_axis ) )
-            z_distance = d_axis[2]
+            z_distance = abs(d_axis[2])
             xy_distance = math.sqrt( sum( squared_d_axis[:2] ) )
             axis = [ a for a in self.PositionAxis if a in path_command.Parameters ]
 
@@ -985,7 +993,7 @@ class ToOpenSBP:
             start_position = [ float(self.current_location[a] or 0) for a in 'XYZ' ]
             center_offset = [ float(path_command.Parameters.get(a,None) or 0) for a in 'IJK' ] # k always 0
             end_position = [ float(path_command.Parameters.get(k, start_position[i])) for i,k in enumerate('XYZ') ]
-            z_distance = end_position[2] - start_position[2]
+            z_distance = abs(end_position[2] - start_position[2])
 
             # If the XY is omitted, it means a whole circle, and arc-length-3d will give that
             xy_distance, distance = arc_length_3d(
@@ -1019,7 +1027,7 @@ class ToOpenSBP:
                 raise ValueError(f"No previous F speed at {self.location(path_command)}")
             
             # FIXME: AB not handled yet
-            speeds = [ (f * d/distance) for d in distances_for_speed ]
+            speeds = [ ((f * d/distance) if distance!=0 else 0) for d in distances_for_speed ]
 
         print(f"### set_speed axis {axis}")
 
@@ -1028,8 +1036,13 @@ class ToOpenSBP:
         print(f"### fmt speeds {speeds}")
         # cleans up trailing , when trailing speeds elided
         cmd = f"{native_command},{','.join(speeds)}".rstrip(',')
-        print(f"### cmd {cmd}")
-        return ( z_distance, cmd + nl )
+        # If there is no speed to set (e.g. the move ends up as delta-0), no MS needed
+        if cmd == "MS":
+            cmd = ''
+        else:
+            cmd += nl
+        print(f"### speed cmd {cmd}")
+        return ( z_distance, cmd )
 
     def set_initial_speeds(self, tool_controller, path_command):
         # need to ensure initial values for speeds

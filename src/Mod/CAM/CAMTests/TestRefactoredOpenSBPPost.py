@@ -512,9 +512,9 @@ MX,22.000
 
         self.compare_multi( c, c,
             "--no-header --no-comments --no-show-editor",
+            # note no second MS, because no delta-position 
             self.wrap("""MS,6.972,9.354
 M3,10.000,20.000,30.000
-MS,6.972,9.354
 M3,10.000,20.000,30.000
 """)
         )
@@ -1028,34 +1028,29 @@ PAUSE
 
     def test280(self): 
         """Test drilling"""
-        self.maxDiff = 1024*1024
 
         # We'll trust the other variations (gcode generation tested in TestRefactoredTestPostGCodes.py)
         self.compare_multi( 
+            "G00 X0 Y0 Z5",
             "G73 X1 Y2 Z0 R5 Q1.5 F123",
             "--no-header --comments --no-show-editor",
-            self.wrap("""
-'translate drill [1] G73 F123.000000 Q1.500000 R5.000000 X1.000000 Y2.000000 Z0.000000
-JZ,5.000
+            self.wrap("""J3,0.000,0.000,5.000
+'( G73 X1.00000 Y2.00000 Z0.00000 R5.00000 Q1.50000 F123.00000 )
 J2,1.000,2.000
 MS,,123.000
-MZ,3.500
-JZ,3.750
-JZ,3.575
+M3,,,3.500
+J3,,,3.750
+J3,,,3.575
 MS,,123.000
-MZ,2.000
-JZ,2.250
-JZ,2.075
+M3,,,2.000
+J3,,,2.250
+J3,,,2.075
 MS,,123.000
-MZ,0.500
-JZ,0.750
-JZ,0.575
+M3,,,0.500
+J3,,,0.750
+J3,,,0.575
 MS,,123.000
-MZ,0.000
-JZ,5.000
-'end translate drill [1] G73
-'(finish operation: testpath)
-VD,,,&WASUNITS
-"""),
+M3,,,0.000
+J3,,,5.000
+""", comments=True),
         )
-
