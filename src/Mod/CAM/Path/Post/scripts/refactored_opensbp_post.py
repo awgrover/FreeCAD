@@ -232,9 +232,9 @@ class Refactored_Opensbp(PostProcessor):
             "--native-postamble",
             help='verbatim opensbp commands to be issued after the last command, multi-line w/ \\n. After postamble. Consider a "Cn" or "FB". default=None',
         )
-        # parser.add_argument("--o1", action="store_true", help='turns on optimizations that wouldn't break if you interrupt the execution and did some command manually.') # no such optimizations at this time
-        # These optimizations assume that you don't interrupt execution to insert a manual command (e.g. imagine a MS 400; and MX,1. which would break all the modal assumptions)
-        _parser.add_argument("--o2", action="store_true", help='turns on --modal --axis-modal')
+        _parser.add_argument("--o1", action="store_true", help="turns on optimizations that wouldn't break if you interrupt the execution and did some command manually: --no-comments --no-header") # no such optimizations at this time
+        _parser.add_argument("--o2", action="store_true", help='turns on --modal --axis-modal --speed-modal')
+        _parser.add_argument("--o3", action="store_true", help='turns on --no-comments --no-header --modal --axis-modal --speed-modal')
         _parser.add_argument(
             # this should probably be True for most shopbot installations
             "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
@@ -272,6 +272,25 @@ class Refactored_Opensbp(PostProcessor):
             #
             self._units = self.values["UNITS"]
             self.values['UNIT_SPEED_FORMAT'] = 'mm/s' if self.values['UNIT_FORMAT']=='mm' else 'in/s'
+
+            # too late for .values, so do them by hand
+            cli_sets = { 
+                'o1': { 'comments' : False, 'no_comments' : True, 'no_header' : True, 'header' : False },
+            }
+            value_sets = {
+                'o1': { 'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False },
+            }
+
+            print(f"### ARGS {args}\n{getattr(args,'o1',None)}")
+            for opt in [ 'o1', 'o2', 'o3' ]:
+                if getattr(args, opt, None):
+                    print(f"### OH {opt}")
+                    for arg_name, value in cli_sets[opt].items():
+                        print(f"###   set {arg_name}={value}")
+                        setattr(args, arg_name,value)
+                    for value_key, value in value_sets[opt].items():
+                        self.values[ value_key ] = value
+                
         #
         # If the flag is False, then args is either None (indicating an error while
         # processing the arguments) or a string containing the argument list formatted
@@ -642,7 +661,7 @@ class ToOpenSBP:
         elif path_command.Name.startswith("(Cam File: "):
             rez += self.comment(f"Job: {self.post._job.Label}")
         elif m:=re.match(r'\(\s*MC_RUN_COMMAND\s+(.+)\)$', path_command.Name):
-            print(f"### MC {m.group(1)}")
+            # let's leave the original as a comment (if comments are on)
             rez += m.group(1) + "\n"
 
         return rez
@@ -723,7 +742,7 @@ class ToOpenSBP:
     def t_move(self, path_command):
         """Oh boy.
         opensbp specifies the xy speed, and Z speed separately for a motion.
-        e.g. a "MS,sxy,sz" then a "M3,x,y,z".
+        e.g. a "MS,sxy,sz" then the move like "M3,x,y,z".
         But, gcode has a F which the speed of the vector
         (for rapid, it's whatever-the-machine-setting-is).
         FreeCAD has horizontal speed (xy), and vertical speed (z),
@@ -938,7 +957,6 @@ class ToOpenSBP:
             native_command = 'MS'
 
         last_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ]
-        ##this_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ] # so axis can be omitted from a command
         fmt_diff = lambda l:  [(f"{p:9.3f}" if p is not None else f"{str(p):9s}") for p in l]
         print(f"### Last {fmt_diff(last_position)}")
         print(f"### end {self.end_location}")
