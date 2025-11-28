@@ -23,14 +23,13 @@
 # *                                                                         *
 # ***************************************************************************
 
-import sys
 import re
 import argparse
 from copy import copy
 import operator
 import math
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 from Path.Post.Processor import PostProcessor
 import Path.Post.UtilsArguments as PostUtilsArguments
@@ -52,23 +51,22 @@ else:
 #
 # Define some types that are used throughout this file.
 #
-Defaults = Dict[str, bool]
+Defaults = dict[str, bool]
 FormatHelp = str
 GCodeOrNone = Optional[str]
-GCodeSections = List[Tuple[str, GCodeOrNone]]
+GCodeSections = list[tuple[str, GCodeOrNone]]
 Parser = argparse.ArgumentParser
 ParserArgs = Union[None, str, argparse.Namespace]
-Postables = Union[List, List[Tuple[str, List]]]
-Section = Tuple[str, List]
-Sublist = List
+Postables = Union[list, list[tuple[str, list]]]
+Section = tuple[str, list]
+Sublist = list
 Units = str
-Values = Dict[str, Any]
-Visible = Dict[str, bool]
+Values = dict[str, Any]
+Visible = dict[str, bool]
 nl = "\n" # particularly useful in a f-string
 
 class Refactored_Opensbp(PostProcessor):
-    """
-    For ShopBot (or other opensbp controllers), this is a CAM postprocessor. We have to
+    """For ShopBot (or other opensbp controllers), this is a CAM postprocessor. We have to
     translate gcode to opensbp, so the output is NOT gcode.
 
     Special behaviors:
@@ -136,7 +134,7 @@ class Refactored_Opensbp(PostProcessor):
 
     def init_values(self, values: Values) -> None:
         """Initialize values that are used throughout the postprocessor."""
-        print(f"### Init .values")
+        print("### Init .values")
         #
         PostUtilsArguments.init_shared_values(values)
         #
@@ -160,7 +158,7 @@ class Refactored_Opensbp(PostProcessor):
             "PREAMBLE" : "",
             'SPINDLE_WAIT' : 3, # for manual case
             'STOP_SPINDLE_FOR_TOOL_CHANGE' : False,
-            #'SUPPRESS_COMMANDS' : [ 'G54' ], # we don't have coord-systems (yet)
+            'SUPPRESS_COMMANDS' : [ 'G54' ], # we don't have coord-systems (yet) # G99,G98,G80 added automatically
             # 'TOOL_CHANGE' : we have to generate this dynamically
             'TRANSLATE_DRILL_CYCLES' : True,
             "UNITS" : self._units,
@@ -204,9 +202,9 @@ class Refactored_Opensbp(PostProcessor):
         #
         # Modify the visibility of any arguments from the defaults here.
         #
-        arguments_visible.update( { k:False for k in [
+        arguments_visible.update( { k:False for k in (
             'bcnc', 'tlo', 'translate_drill',
-        ] } )
+        ) } )
         print(f"### arguments_visible {arguments_visible}")
 
     def init_arguments(
@@ -251,7 +249,7 @@ class Refactored_Opensbp(PostProcessor):
 
         return _parser
 
-    def process_arguments(self) -> Tuple[bool, ParserArgs]:
+    def process_arguments(self) -> tuple[bool, ParserArgs]:
         """Process any arguments to the postprocessor."""
         #
         # This function is separated out to make it easier to inherit from this postprocessor
@@ -282,30 +280,30 @@ class Refactored_Opensbp(PostProcessor):
                 )
 
             # too late for .values, so do them by hand
-            arg_sets = { 
+            arg_sets = {
                 'o1': {
                     'cli' : { 'comments' : False, 'no_comments' : True, 'no_header' : True, 'header' : False },
                     'values' : { 'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False },
                 },
                 'o2' : {
-                    'cli' : { 
-                        'modal' : True, 'no_modal' : False, 
+                    'cli' : {
+                        'modal' : True, 'no_modal' : False,
                         'axis-modal' : True , 'no-axis-modal' : False,
                     },
-                    'values' : { 
-                        'MODAL' : True, 
+                    'values' : {
+                        'MODAL' : True,
                         'OUTPUT_DOUBLES' : False,
                     },
                 },
                 'o3': {
-                    'cli' : { 
-                        'comments' : False, 'no_comments' : True, 
-                        'no_header' : True, 'header' : False, 
-                        'modal' : True, 'no_modal' : False, 
+                    'cli' : {
+                        'comments' : False, 'no_comments' : True,
+                        'no_header' : True, 'header' : False,
+                        'modal' : True, 'no_modal' : False,
                         'axis-modal' : True , 'no-axis-modal' : False,
                     },
-                    'values' : { 
-                        'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False, 
+                    'values' : {
+                        'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False,
                         'MODAL' : True,
                         'OUTPUT_DOUBLES' : False,
                     },
@@ -313,7 +311,7 @@ class Refactored_Opensbp(PostProcessor):
             }
 
             print(f"### ARGS {args}\n{getattr(args,'o1',None)}")
-            for opt in [ 'o1', 'o2', 'o3' ]:
+            for opt in ( 'o1', 'o2', 'o3' ):
                 if getattr(args, opt, None):
                     print(f"### OH {opt}")
                     cli_set = arg_sets[opt]['cli']
@@ -323,7 +321,7 @@ class Refactored_Opensbp(PostProcessor):
                         setattr(args, arg_name,value)
                     for value_key, value in value_set.items():
                         self.values[ value_key ] = value
-                
+
         #
         # If the flag is False, then args is either None (indicating an error while
         # processing the arguments) or a string containing the argument list formatted
@@ -463,11 +461,11 @@ def gcode(*commands):
 
 def gcode_insertmap():
     # see gcode() above. this inserts the map
-    for name, attr in ToOpenSBP.__dict__.items():
+    for attr in ToOpenSBP.__dict__.values():
         if callable(attr) and hasattr(attr, "_gcode"):
             for g in attr._gcode:
                 ToOpenSBP.DispatchMap[g] = attr
-    print(f"### DispatchMap {[x for x in sorted(ToOpenSBP.DispatchMap.keys())]}")
+    print(f"### DispatchMap {list(sorted(ToOpenSBP.DispatchMap.keys()))}")
 
 class ToOpenSBP:
     """Translate gcode to opensbp
@@ -477,9 +475,9 @@ class ToOpenSBP:
 
     DispatchMap = {}
 
-    VDCommand = { 
-        'inches' : "VD,,,0", 
-        'metric' : "VD,,,1" 
+    VDCommand = {
+        'inches' : "VD,,,0",
+        'metric' : "VD,,,1"
     }
     # aliases for other uses
     VDCommand['G20'] = VDCommand['inches']
@@ -490,7 +488,7 @@ class ToOpenSBP:
         self.post = postprocessor
 
         # xyzf etc state
-        self.current_location = { p:None for p in self.post.values["PARAMETER_ORDER"] } 
+        self.current_location = { p:None for p in self.post.values["PARAMETER_ORDER"] }
         self.current_location['JSXY'] = None
         self.current_location['JSZ'] = None
         self.end_location = [ None for x in self.PositionAxis ]
@@ -501,7 +499,7 @@ class ToOpenSBP:
     def translate(self, gcode ):
         """Entry point, returns the translated contents, e.g. opensbp lines.
         We rely on self.post to hold some state vars: we reuse self.post.values.
-        We have lost most context, and structuring of the gcode/job at this point, 
+        We have lost most context, and structuring of the gcode/job at this point,
         and the export_common() has potentially inserted and translated stuff.
         This makes it harder to do stuff like --native-preamble.
         So, we repeat some logic from UtilsParse, like "is this a tool change?", etc.
@@ -546,10 +544,10 @@ class ToOpenSBP:
                         for a in self.PositionAxis
             ]
             skip_modal = False
-            print(f"### Skip modal? {path_command.Name} G? {path_command.Name in ['G00', 'G01']} modal? {self.post.values['MODAL'] }")
+            print(f"### Skip modal? {path_command.Name} G? {path_command.Name in {'G00', 'G01'}} modal? {self.post.values['MODAL'] }")
             print(f"###      will_end {new_location} == last {self.end_location} ? {new_location == self.end_location}")
 
-            if path_command.Name in ['G00', 'G01'] and self.post.values['MODAL'] and new_location == self.end_location:
+            if path_command.Name in {'G00', 'G01'} and self.post.values['MODAL'] and new_location == self.end_location:
                 print(f"### Modal skip {path_command.toGCode()}")
                 skip_modal = True
 
@@ -560,9 +558,9 @@ class ToOpenSBP:
                 else:
                     raise Exception('Relative G91 not supported yet')
                     # FIXME: not tested (relative mode not fully implemented):
-                    self.end_location = [ 
+                    self.end_location = [
                         float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
-                        for a in self.current_location if a in self.PositionAxis 
+                        for a in self.current_location if a in self.PositionAxis
                     ]
                 print(f"### end at {self.end_location}")
 
@@ -576,14 +574,14 @@ class ToOpenSBP:
 
             # append to buffer
             native += rez
-            
+
             if path_command.Name in self.post.values['MOTION_COMMANDS']:
                 for i,a in enumerate(self.PositionAxis):
                     self.current_location[a] = self.end_location[i]
                 print(f"### current {self.current_location}")
 
             self.post.values['last_command'] = path_command
-            
+
         native += self.postfix()
 
         print(f"### GCode {before_len} -> {len(native.split(nl))}")
@@ -604,7 +602,7 @@ class ToOpenSBP:
             rez += nl
 
         return rez
-        
+
     def reset_values(self):
         self.post.values.update({
             'line_number' : 0,
@@ -681,7 +679,7 @@ class ToOpenSBP:
         return f"{self.post.values['Operation']}{g}"
 
     def comment(self, message, force=False):
-        """if OUTPUT_COMMENTS, then generate the comment, 
+        """if OUTPUT_COMMENTS, then generate the comment,
         `force` ignores OUTPUT_COMMENTS and always generates.
         INCLUDES the \n (nl)!
         """
@@ -756,7 +754,7 @@ class ToOpenSBP:
                 rez = [
                     f"&Tool={tool_number}",
                     "C9 'toolchanger",
-                    f'&ToolName="{safe_tool_name}"', 
+                    f'&ToolName="{safe_tool_name}"',
                 ]
             else:
                 # Manual, Prompt (on second)
@@ -766,7 +764,7 @@ class ToOpenSBP:
                 ]
                 print(f"### change #{tool_number}: {tool_name}")
                 if self.post.values['first_tool']:
-                    print(f"### first_tool")
+                    print("### first_tool")
                     rez.append( self.comment(f"First change tool, should already be #{tool_number}: {tool_name}", force=True).rstrip() )
                     self.post.values['first_tool'] = False
                 else:
@@ -775,7 +773,7 @@ class ToOpenSBP:
                     # causes a modal-dialog to show message and ask "ok?"
                     rez.append( "PAUSE" )
                 rez.append( f'&ToolName="{safe_tool_name}"' )
-                
+
             rez = nl.join(rez) + nl
         else:
             rez = ''
@@ -825,7 +823,7 @@ class ToOpenSBP:
                     raise ValueError(f"Rapid moves (G0) can't have an F at {self.location(path_command)}")
 
         print(f"### move {path_command.Name} F {feed_rate}")
-        dz, speed_command = self.set_speed( path_command, feed_rate )
+        _, speed_command = self.set_speed( path_command )
         rez += speed_command
 
         native_command = 'J' if path_command.Name == 'G00' else "M"
@@ -902,7 +900,7 @@ class ToOpenSBP:
 
         if self.post.values['MOTION_MODE'] != 'G90':
             opname = self.post.values['Operation'].Label if self.post.values['Operation'] else ''
-            message = f"We can't do relative mode for arcs in [{self.post.values['line_number']}] {opname} {command.toGCode()}"
+            message = f"We can't do relative mode for arcs in [{self.post.values['line_number']}] {opname} {path_command.toGCode()}"
             FreeCAD.Console.PrintError(message)
             if self.post.arguments.abort_on_unknown:
                 raise NotImplementedError(message)
@@ -915,9 +913,7 @@ class ToOpenSBP:
             dirstring = "-1"
         txt = ""
 
-        axis = [ path_command.Parameters.get(a,None) for a in self.PositionAxis ]
-
-        dz, speed_command = self.set_speed( path_command, path_command.Parameters['F'] )
+        dz, speed_command = self.set_speed( path_command )
         txt += speed_command
 
         txt += "CG,"
@@ -993,10 +989,10 @@ class ToOpenSBP:
         return 'C5\n'
 
     @gcode('M02')
-    def t_stop_spindle(self, command):
+    def t_stop(self, command):
         return 'END\n'
 
-    def set_speed( self, path_command, feed_rate ):
+    def set_speed( self, path_command ):
         # For non-rapid, F applies to the vector of all the axis
         # For rapid, full speed on the axis from the toolchange settings
         #   (so no output here)
@@ -1011,7 +1007,9 @@ class ToOpenSBP:
             native_command = 'MS'
 
         last_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ]
-        fmt_diff = lambda l:  [(f"{p:9.3f}" if p is not None else f"{str(p):9s}") for p in l]
+        def fmt_diff( l ):
+            return [(f"{p:9.3f}" if p is not None else f"{str(p):9s}") for p in l]
+
         print(f"### Last {fmt_diff(last_position)}")
         print(f"### end {self.end_location}")
         print(f"### end {fmt_diff(self.end_location)}")
@@ -1027,10 +1025,9 @@ class ToOpenSBP:
             axis = [ a for a in self.PositionAxis if a in path_command.Parameters ]
 
         # Arcs
-        elif path_command.Name in ['G02','G03']:
+        elif path_command.Name in {'G02','G03'}:
             def arc_length_3d(center, start, end, clockwise):
-                """
-                center, start, end: (x, y, z) tuples
+                """center, start, end: (x, y, z) tuples
                 clockwise: True for G2, False for G3
                 Returns the true 3D arc length.
                 """
@@ -1078,7 +1075,7 @@ class ToOpenSBP:
                 path_command.Name=='G02' # clockwise?
             )
 
-            axis = [ a for a in 'XYZ' ]
+            axis = list('XYZ')
 
         distances_for_speed = [ xy_distance, z_distance ]
         print(f"### dist {distance} d xy,z {distances_for_speed}")
@@ -1100,7 +1097,7 @@ class ToOpenSBP:
                 print(f"### cur_loc f {f}")
             if f is None:
                 raise ValueError(f"No previous F speed at {self.location(path_command)}")
-            
+
             # FIXME: AB not handled yet
             speeds = [ ((f * d/distance) if distance!=0 else 0) for d in distances_for_speed ]
 
@@ -1198,7 +1195,7 @@ class ToOpenSBP:
         print(f"### setspeeds hasjs {speeds['has_js']} {speeds['js']}")
         if self.post.arguments.abort_on_unknown and speeds['has_js'] < 3:
             raise ValueError(f"ToolController <{self.post._job.Label}>.<{tool_controller.Label}> did not set xy&z rapid speeds, use --no-abort-on-unknown to allow at {self.location(path_command)}")
-            
+
         return native
 
 gcode_insertmap() # fixup DispatchMap
