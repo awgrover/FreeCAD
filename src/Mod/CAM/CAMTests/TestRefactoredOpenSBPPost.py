@@ -162,6 +162,10 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         post_args = args[-2]
         expected = args[-1]
 
+        # need the --.... line
+        if post_args != '' and post_args is not None:
+            expected = expected.format(ARGS=f"'  {post_args}")
+
         #print(f"###test multi path str {args[:-2]}")
         #print(f"###test in gcode {[p.toGCode() for p in self.profile_op.Path.Commands]}")
         self.job.PostProcessorArgs = post_args
@@ -226,9 +230,9 @@ JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
 
         hdr = ""
         if header:
-            hdr = """'(Exported by FreeCAD)
+            hdr = f"""'(Exported by FreeCAD)
 '(Post Processor: refactored_opensbp_post)
-'  --no-show-editor
+{{ARGS}}
 '(Cam File: boxtest.fcstd)
 'Job: Job
 """
@@ -414,7 +418,7 @@ M3,0.39,0.79,1.18
         self.compare_multi(
             f"G1 F{f} X10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,{f}
+            self.wrap(f"""MS,{f},0.000
 MX,10.000
 """)
         )
@@ -423,7 +427,7 @@ MX,10.000
         self.compare_multi(
             f"G1 F{f} Y10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,{f}
+            self.wrap(f"""MS,{f},0.000
 M2,,10.000
 """)
         )
@@ -434,7 +438,7 @@ M2,,10.000
         self.compare_multi(
             f"G1 F{f} Z10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,,{f}
+            self.wrap(f"""MS,0.000,{f}
 M3,,,10.000
 """)
         )
@@ -444,7 +448,7 @@ M3,,,10.000
         self.compare_multi(
             f"G1 F{f} X10 Y0 Z0",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,{f}
+            self.wrap(f"""MS,{f},0.000
 M3,10.000,0.000,0.000
 """)
         )
@@ -462,11 +466,11 @@ M3,10.000,0.000,0.000
             f"G1 F{f} Z1",
             "--no-header --no-comments --metric --no-show-editor",
             self.wrap(f"""J3,10.000,10.000,10.000
-MS,{f}
+MS,{f},0.000
 MX,1.000
-MS,{f}
+MS,{f},0.000
 M2,,1.000
-MS,,{f}
+MS,0.000,{f}
 M3,,,1.000
 """)
         )
@@ -477,7 +481,7 @@ M3,,,1.000
             f"G1 F{f} X1 Y1",
             "--no-header --no-comments --metric --no-show-editor",
             self.wrap(f"""J3,10.000,10.000,10.000
-MS,{f}
+MS,{f},0.000
 M2,1.000,1.000
 """)
         )
@@ -514,7 +518,7 @@ M3,-2.000,-3.000,-4.000
             "(none)",
             f"--no-header --no-comments --preamble='G0 Z50\nG1 F700 X20' --no-show-editor --metric",
             self.wrap("", preamble="""J3,,,50.000
-MS,700.000
+MS,700.000,0.000
 MX,20.000
 """)
         )
@@ -533,7 +537,7 @@ MX,20.000
             "(none)",
             "--no-header --no-comments --postamble='G0 Z55\nG1 F700 X22' --no-show-editor",
         self.wrap('', postamble="""J3,,,55.000
-MS,700.000
+MS,700.000,0.000
 MX,22.000
 """)
         )
@@ -571,11 +575,12 @@ MX,22.000
             # note no second MS, because no delta-position 
             self.wrap("""MS,6.972,9.354
 M3,10.000,20.000,30.000
+MS,0.000,0.000
 M3,10.000,20.000,30.000
 """)
         )
         self.compare_multi( c, c,
-            "--no-header --no-comments --modal --no-show-editor",
+            "--no-header --no-comments --modal --speed-modal --no-show-editor",
             self.wrap("""MS,6.972,9.354
 M3,10.000,20.000,30.000
 """)
@@ -1047,7 +1052,7 @@ J3,,,5.010
 MS,223.515,556.813
 CG,,,,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.010
 J3,,,5.020
-MS,500.000
+MS,500.000,0.000
 CG,,50.000,60.020,1.000,2.000,T,1,0,,,,0,1,0
 """)
         )
@@ -1093,19 +1098,19 @@ PAUSE
             self.wrap("""J3,0.000,0.000,5.000
 '( G73 X1.00000 Y2.00000 Z0.00000 R5.00000 Q1.50000 F123.00000 )
 J2,1.000,2.000
-MS,,123.000
+MS,0.000,123.000
 M3,,,3.500
 J3,,,3.750
 J3,,,3.575
-MS,,123.000
+MS,0.000,123.000
 M3,,,2.000
 J3,,,2.250
 J3,,,2.075
-MS,,123.000
+MS,0.000,123.000
 M3,,,0.500
 J3,,,0.750
 J3,,,0.575
-MS,,123.000
+MS,0.000,123.000
 M3,,,0.000
 J3,,,5.000
 """, comments=True),
@@ -1123,7 +1128,26 @@ PRINT "Hello"
 """, comments=True)
         )
 
-    def test300(self):
+    def test310(self):
+        """--speed-modal"""
+        self.compare_multi( 
+            "G0 X10 Y10 Z10",
+            "G1 F100 X100",
+            "G1 F100 X200",
+            "G1 F100 Z100",
+            "G1 F100 Z200",
+            "--speed-modal --no-header --no-comments --no-show-editor",
+            self.wrap("""J3,10.000,10.000,10.000
+MS,100.000,0.000
+MX,100.000
+MX,200.000
+MS,0.000,100.000
+M3,,,100.000
+M3,,,200.000
+""")
+    )
+
+    def test390(self):
         """Optimization o1 o2 o3"""
 
         self.compare_multi( 

@@ -232,8 +232,10 @@ class Refactored_Opensbp(PostProcessor):
             "--native-postamble",
             help='verbatim opensbp commands to be issued after the last command, multi-line w/ \\n. After postamble. Consider a "Cn" or "FB". default=None',
         )
+        _parser.add_argument("--speed-modal", action="store_true", help="skip MS|JS if the speed hasn't changed. Default False", default=False)
         _parser.add_argument("--o1", action="store_true", help="turns on optimizations that wouldn't break if you interrupt the execution and did some command manually: --no-comments --no-header") # no such optimizations at this time
         _parser.add_argument("--o2", action="store_true", help='turns on --modal --axis-modal --speed-modal')
+
         _parser.add_argument("--o3", action="store_true", help='turns on --no-comments --no-header --modal --axis-modal --speed-modal')
         _parser.add_argument(
             # this should probably be True for most shopbot installations
@@ -503,8 +505,6 @@ class ToOpenSBP:
         self.reset_values()
         print(f"### post.values {self.post.values}")
 
-        last_native = None
-
         for gcode_line in gcode.split(nl):
             self.post.values["line_number"] += 1 # actual line number
 
@@ -512,24 +512,42 @@ class ToOpenSBP:
             path_command = self.to_path_command(gcode_line, f"expanded gcode line {self.post.values['line_number']}")
             if path_command is None:
                 continue
+
+            # canonicalize to 2 digits
+            if path_command.Name.startswith('('):
+                pass
+            else:
+                # canonicalize to 2 digits
+                # All the @gcode() methods can now assume 2 digits
+                path_command.Name = re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', path_command.Name)
+
             print(f"### GCODE [{self.post.values['line_number']}] {path_command.toGCode()}")
 
             # And now we reproduce most of UtilsParse.parse_a_path
 
             self.track_by_comments( path_command )
 
-            # one place to figure out our end, for set_speed()
             if self.post.arguments.gcode_comments and not path_command.Name.startswith('('):
                 native += self.comment( f"[{self.post.values['line_number']}] {path_command.toGCode()}" )
 
+            new_location = [
+                        float(path_command.Parameters.get(a, self.current_location.get(a, 0.0)) or 0.0)
+                        for a in self.PositionAxis
+            ]
+            skip_modal = False
+            print(f"### Skip modal? {path_command.Name} G? {path_command.Name in ['G00', 'G01']} modal? {self.post.values['MODAL'] }")
+            print(f"###      will_end {new_location} == last {self.end_location} ? {new_location == self.end_location}")
+
+            if path_command.Name in ['G00', 'G01'] and self.post.values['MODAL'] and new_location == self.end_location:
+                print(f"### Modal skip {path_command.toGCode()}")
+                skip_modal = True
+
+            # one place to figure out our end, used by set_speed()
             if path_command.Name in self.post.values['MOTION_COMMANDS']:
                 if self.post.values['MOTION_MODE'] == 'G90':
-                    self.end_location = [ 
-                        float(path_command.Parameters.get(a, self.current_location.get(a, 0.0)) or 0.0)
-                        for a in self.PositionAxis 
-                    ]
+                    self.end_location = new_location
                 else:
-                    raise('bob')
+                    raise Exception('Relative G91 not supported yet')
                     # FIXME: not tested (relative mode not fully implemented):
                     self.end_location = [ 
                         float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
@@ -537,20 +555,20 @@ class ToOpenSBP:
                     ]
                 print(f"### end at {self.end_location}")
 
-            # handle that gcode
-            print(f"### path_command is {path_command.__class__.__name__}")
-            rez = self.dispatch( path_command )
-            print(f"### translated: {rez.rstrip()}")
+            if skip_modal:
+                rez = ''
+            else:
+                # handle that gcode
+                print(f"### path_command is {path_command.__class__.__name__}")
+                rez = self.dispatch( path_command )
+                print(f"### translated: {rez.rstrip()}")
 
             # append to buffer
-            if self.post.values['MODAL'] and rez == last_native: # FIXME only true for absolute mode
-                print(f"### modal elided")
-            else:
-                native += rez
-            last_native = rez
+            native += rez
             
             if path_command.Name in self.post.values['MOTION_COMMANDS']:
-                self.current_location.update(path_command.Parameters)
+                for i,a in enumerate(self.PositionAxis):
+                    self.current_location[a] = self.end_location[i]
                 print(f"### current {self.current_location}")
 
             self.post.values['last_command'] = path_command
@@ -628,9 +646,6 @@ class ToOpenSBP:
             # sadly, Path.Command doesn't set .Name to "comment", but rather to the comment string
             command = 'comment'
         else:
-            # canonicalize to 2 digits
-            # All the @gcode() methods can now assume 2 digits
-            path_command.Name = re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', path_command.Name)
             command = path_command.Name
 
         # Call the translate handler
@@ -1070,10 +1085,19 @@ class ToOpenSBP:
             # FIXME: AB not handled yet
             speeds = [ ((f * d/distance) if distance!=0 else 0) for d in distances_for_speed ]
 
+        if self.post.arguments.speed_modal:
+            for i,new_speed in enumerate( speeds ):
+                old_speed = self.current_location[native_command.lower()][i]
+                if old_speed == new_speed:
+                    speeds[i] = ''
+
+        # before we elide speeds[]
+        # save it for next time, for --speed-modal
+        self.current_location[native_command.lower()] = speeds
         print(f"### set_speed axis {axis}")
 
-        # elide 0's, since that means we aren't moving in that axis
-        speeds = [ (format(s, f'.{self.post.values["AXIS_PRECISION"]}f') if s!=0.0 else '') for s in speeds ]
+        # only elide ''
+        speeds = [ (format(s, f'.{self.post.values["AXIS_PRECISION"]}f') if s !='' else '') for s in speeds ]
         print(f"### fmt speeds {speeds}")
         # cleans up trailing , when trailing speeds elided
         cmd = f"{native_command},{','.join(speeds)}".rstrip(',')
@@ -1141,6 +1165,10 @@ class ToOpenSBP:
         else:
             speeds['js'].append('')
             native += self.comment("no VertRapid", force=True)
+
+        # for --speed-modal
+        for x in ('ms','js'):
+            self.current_location[x] = speeds[x]
 
         # don't use Tool's Rapid if --no-native-rapid
         if speeds['has_js'] > 0 and not self.post.arguments.native_rapid:
