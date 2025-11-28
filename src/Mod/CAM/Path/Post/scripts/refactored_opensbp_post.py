@@ -243,7 +243,7 @@ class Refactored_Opensbp(PostProcessor):
         )
         _parser.add_argument("--filter","--filters", help="a ',' list of filters in FreeCAD.getUserMacroDir()/post to run on the gcode of each Path object, before we see it (i.e. cleanups). A class of same (camelcase) name as file, __init__(self,objectslist, filename, argstring), .filter(eachpathobj, its-.Commands) -> gcode")
         _parser.add_argument("--abort-on-unknown", action=argparse.BooleanOptionalAction, help="Generate an error and fail if an unknown gcode is seen. default=True", default=True)
-        _parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, change them to a comment. E.g. --skip-unknown G55,G56")
+        _parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, but change them to a comment. E.g. --skip-unknown G55,G56. Always include G54,G99,G98,G80")
         _parser.add_argument("--native-rapid", action=argparse.BooleanOptionalAction, help="Use machine's rapid speeds, not the ToolController, default=--no-native-rapid", default=False)
         _parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
         _parser.add_argument("--spindle-controller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
@@ -274,6 +274,12 @@ class Refactored_Opensbp(PostProcessor):
             #
             self._units = self.values["UNITS"]
             self.values['UNIT_SPEED_FORMAT'] = 'mm/s' if self.values['UNIT_FORMAT']=='mm' else 'in/s'
+
+            if args.skip_unknown:
+                self.values['SUPPRESS_COMMANDS'].extend(
+                    # and canonicalize
+                    [ re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', g) for g in args.skip_unknown.split(',') ]
+                )
 
             # too late for .values, so do them by hand
             arg_sets = { 

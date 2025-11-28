@@ -1169,7 +1169,7 @@ J3,106.000,,107.000
 """)
     )
 
-    def test390(self):
+    def test330(self):
         """Optimization o1 o2 o3"""
 
         self.compare_multi( 
@@ -1197,3 +1197,20 @@ J3,10.000,10.000,10.000
             self.wrap("""J3,10.000,10.000,10.000
 """)
     )
+
+    def test350(self):
+        """--skip-unknown"""
+
+        with self.assertRaises(NotImplementedError) as context:
+            self.compare_multi( 
+                "G111",
+                "--no-show-editor",
+                self.wrap("throws")
+            )
+        self.assertTrue('gcode not handled' in str(context.exception))
+
+        self.compare_multi( 
+            "G111",
+            "--skip-unknown G111,G777 --no-show-editor --no-comments --no-header",
+            self.wrap("")
+        )
