@@ -84,7 +84,7 @@ class Refactored_Opensbp(PostProcessor):
     * Do opensbp prompt (dialog-box) behavior like this:
         (this comment becomes a dialog-box if followed by M00)
         M00
-    * --modal means commands + their parameters (because opensbp doesn't do gcode "modal"), i.e. whole lines
+    * --modal only applies to G00 and G01
     * Note that --preamble occurs before the machine-units are set, could be a problem! (not under our control)
     * Most optimizations assume that the instruction stream isn't interrupted with manually added commands (e.g. assumes the xyz position from the previous instructions). So, don't stop, and insert commands if you've used any of the optimizations.
     * This always sets the move & jog speeds (feed and rapid) at the beginning of an operation, by fetching the Tool speeds (because some operations omit initial speeds).
@@ -283,20 +283,25 @@ class Refactored_Opensbp(PostProcessor):
                 },
                 'o2' : {
                     'cli' : { 
-                        'modal' : True, 'no_modal' : False, 'axis-modal' : True ,
+                        'modal' : True, 'no_modal' : False, 
+                        'axis-modal' : True , 'no-axis-modal' : False,
                     },
                     'values' : { 
-                        'MODAL' : True 
+                        'MODAL' : True, 
+                        'OUTPUT_DOUBLES' : False,
                     },
                 },
                 'o3': {
                     'cli' : { 
                         'comments' : False, 'no_comments' : True, 
                         'no_header' : True, 'header' : False, 
-                        'modal' : True, 'no_modal' : False, 'axis-modal' : True ,
+                        'modal' : True, 'no_modal' : False, 
+                        'axis-modal' : True , 'no-axis-modal' : False,
                     },
                     'values' : { 
-                        'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False, 'MODAL' : True 
+                        'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False, 
+                        'MODAL' : True,
+                        'OUTPUT_DOUBLES' : False,
                     },
                 }
             }
@@ -797,15 +802,15 @@ class ToOpenSBP:
         rez = ''
 
         # Optimize the command, specifying 1..5 axis values
-        # XYZABC, but reversed
         axis = [ path_command.Parameters.get(a,None) for a in self.PositionAxis ]
-        first_not_none = 0
+        last_not_none = 0
+        # XYZABC, but reversed
         for i in reversed(range(0,len(axis))):
             if axis[i] is not None:
-                first_not_none = i
+                last_not_none = i
                 break
-        print(f"### specified axis {axis}[{first_not_none}:]")
-        axis = axis[:first_not_none+1]
+        print(f"### specified axis {axis}[{last_not_none}:]")
+        axis = axis[:last_not_none+1]
         print(f"### specified axis {axis}")
 
         if feed_rate := path_command.Parameters.get('F', None):

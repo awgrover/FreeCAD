@@ -1147,6 +1147,28 @@ M3,,,200.000
 """)
     )
 
+    def test320(self):
+        """--axis-modal"""
+        self.compare_multi( 
+            # all G0's, so no MS
+            "G0 X10 Y10 Z10",
+            "G0 F100 X100 Y10 Z10", # dX
+            "G0 F100 X101 Z10", # dx
+            "G0 F100 X101 Y102 Z10", # dY
+            "G0 F100 X101 Y102 Z103", # dz
+            "G0 F100 X104 Y105 Z103", # dxy
+            "G0 F100 X106 Y105 Z107", # dxz
+            "--axis-modal --speed-modal --no-header --no-comments --no-show-editor",
+            self.wrap("""J3,10.000,10.000,10.000
+JX,100.000
+JX,101.000
+J2,,102.000
+J3,,,103.000
+J2,104.000,105.000
+J3,106.000,,107.000
+""")
+    )
+
     def test390(self):
         """Optimization o1 o2 o3"""
 
