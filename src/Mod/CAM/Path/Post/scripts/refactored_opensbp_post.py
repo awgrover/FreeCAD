@@ -274,21 +274,41 @@ class Refactored_Opensbp(PostProcessor):
             self.values['UNIT_SPEED_FORMAT'] = 'mm/s' if self.values['UNIT_FORMAT']=='mm' else 'in/s'
 
             # too late for .values, so do them by hand
-            cli_sets = { 
-                'o1': { 'comments' : False, 'no_comments' : True, 'no_header' : True, 'header' : False },
-            }
-            value_sets = {
-                'o1': { 'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False },
+            arg_sets = { 
+                'o1': {
+                    'cli' : { 'comments' : False, 'no_comments' : True, 'no_header' : True, 'header' : False },
+                    'values' : { 'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False },
+                },
+                'o2' : {
+                    'cli' : { 
+                        'modal' : True, 'no_modal' : False, 'axis-modal' : True ,
+                    },
+                    'values' : { 
+                        'MODAL' : True 
+                    },
+                },
+                'o3': {
+                    'cli' : { 
+                        'comments' : False, 'no_comments' : True, 
+                        'no_header' : True, 'header' : False, 
+                        'modal' : True, 'no_modal' : False, 'axis-modal' : True ,
+                    },
+                    'values' : { 
+                        'OUTPUT_HEADER' : False, 'OUTPUT_COMMENTS' : False, 'MODAL' : True 
+                    },
+                }
             }
 
             print(f"### ARGS {args}\n{getattr(args,'o1',None)}")
             for opt in [ 'o1', 'o2', 'o3' ]:
                 if getattr(args, opt, None):
                     print(f"### OH {opt}")
-                    for arg_name, value in cli_sets[opt].items():
+                    cli_set = arg_sets[opt]['cli']
+                    value_set = arg_sets[opt]['values']
+                    for arg_name, value in cli_set.items():
                         print(f"###   set {arg_name}={value}")
                         setattr(args, arg_name,value)
-                    for value_key, value in value_sets[opt].items():
+                    for value_key, value in value_set.items():
                         self.values[ value_key ] = value
                 
         #

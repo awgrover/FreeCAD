@@ -1127,10 +1127,27 @@ PRINT "Hello"
         """Optimization o1 o2 o3"""
 
         self.compare_multi( 
-        "G0 X10 Y10 Z10",
-        "G0 X10 Y10 Z10", # should see the repeated command
-        "--o1",
-        self.wrap("""J3,10.000,10.000,10.000
+            "G0 X10 Y10 Z10",
+            "G0 X10 Y10 Z10", # should see the repeated command
+            "--o1 --no-show-editor",
+            self.wrap("""J3,10.000,10.000,10.000
 J3,10.000,10.000,10.000
+""")
+    )
+
+        self.compare_multi( 
+            "G0 X10 Y10 Z10",
+            "G0 X10 Y10 Z10", # should not see the repeated command
+            "--o2 --no-show-editor",
+            self.wrap("""J3,10.000,10.000,10.000
+""", comments=True, header=True),
+    remove=r"'\(Output Time:",
+    )
+
+        self.compare_multi( 
+            "G0 X10 Y10 Z10",
+            "G0 X10 Y10 Z10", # should not see the repeated command
+            "--o3 --no-show-editor",
+            self.wrap("""J3,10.000,10.000,10.000
 """)
     )
