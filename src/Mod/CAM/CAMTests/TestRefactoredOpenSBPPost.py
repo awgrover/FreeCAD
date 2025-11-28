@@ -23,6 +23,7 @@
 # ***************************************************************************
 
 import re
+import math
 
 import unittest
 import FreeCAD
@@ -405,7 +406,7 @@ M3,0.39,0.79,1.18
         )
 
     def test020(self):
-        """Test single access vs speed"""
+        """Test single axis vs speed"""
 
         f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
 
@@ -448,6 +449,61 @@ M3,10.000,0.000,0.000
 """)
         )
 
+    def test025(self):
+        """Test negative directions for speed"""
+
+        f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
+
+        # each axis
+        self.compare_multi(
+            "G0 X10 Y10 Z10",
+            f"G1 F{f} X1",
+            f"G1 F{f} Y1",
+            f"G1 F{f} Z1",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap(f"""J3,10.000,10.000,10.000
+MS,{f}
+MX,1.000
+MS,{f}
+M2,,1.000
+MS,,{f}
+M3,,,1.000
+""")
+        )
+
+        # xy
+        self.compare_multi(
+            "G0 X10 Y10 Z10",
+            f"G1 F{f} X1 Y1",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap(f"""J3,10.000,10.000,10.000
+MS,{f}
+M2,1.000,1.000
+""")
+        )
+
+        # xyz
+        self.compare_multi(
+            "G0 X10 Y10 Z10",
+            f"G1 F{f} X1 Y1 Z1",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap(f"""J3,10.000,10.000,10.000
+MS,9.526,6.736
+M3,1.000,1.000,1.000
+""")
+        )
+
+        # XYZ <0
+        self.compare_multi(
+            "G0 X10 Y10 Z10",
+            f"G1 F{f} X-2 Y-3 Z-4",
+            "--no-header --no-comments --metric --no-show-editor",
+            self.wrap(f"""J3,10.000,10.000,10.000
+MS,9.149,7.240
+M3,-2.000,-3.000,-4.000
+""")
+        )
+        
     def test030(self):
         """
         Test Pre-amble
@@ -1053,4 +1109,16 @@ MS,,123.000
 M3,,,0.000
 J3,,,5.000
 """, comments=True),
+        )
+
+    def test290(self): 
+        """MC_RUN_COMMAND: native pass-through"""
+
+        self.compare_multi( 
+            #"G00 X10 Y10 Z5",
+            '(MC_RUN_COMMAND PRINT "Hello")',
+            "--no-header --comments --no-show-editor",
+            self.wrap("""'(MC_RUN_COMMAND PRINT "Hello")
+PRINT "Hello"
+""", comments=True)
         )

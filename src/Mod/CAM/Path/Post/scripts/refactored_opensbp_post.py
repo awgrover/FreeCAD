@@ -639,8 +639,11 @@ class ToOpenSBP:
         # fixups
         if path_command.Name.startswith("(Post Processor: "):
             rez += self.comment( "  " + self.post._job.PostProcessorArgs )
-        if path_command.Name.startswith("(Cam File: "):
+        elif path_command.Name.startswith("(Cam File: "):
             rez += self.comment(f"Job: {self.post._job.Label}")
+        elif m:=re.match(r'\(\s*MC_RUN_COMMAND\s+(.+)\)$', path_command.Name):
+            print(f"### MC {m.group(1)}")
+            rez += m.group(1) + "\n"
 
         return rez
 
