@@ -581,7 +581,7 @@ J3,,,31.000
 
         gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
 
-        # both tool and spindle: manual
+        # tool change: manual
         self.compare_multi( *gcode_in,
             "--no-header --no-comments --comments --no-show-editor",
             """SA
@@ -600,8 +600,8 @@ PAUSE
 MS,11.667,5.833
 JS,35.000,17.500
 TR,3000
-'Change spindle speed to 3000 rpm
-PAUSE
+C6
+PAUSE 3
 &Tool=3
 'Change tool to #3: T2, 1/8" two flute003
 PAUSE
@@ -614,25 +614,25 @@ VD,,,&WASUNITS
 
         # both tool and spindle: auto
         self.compare_multi( *gcode_in,
-            "--toolchanger --no-comments --spindle-controller --no-header --no-show-editor",
+            "--toolchanger --no-comments --no-header --no-show-editor",
             """SA
 &WASUNITS=%(25)
 VD,,,1
 &Tool=1
-C9 'toolchanger
+C9
 &ToolName="T1 1/8 two flute002"
 MS,11.667,5.833
 JS,35.000,17.500
 &Tool=2
-C9 'toolchanger
+C9
 &ToolName="T3 Fly Cutter"
 MS,11.667,5.833
 JS,35.000,17.500
 TR,3000
-C6 'spindle-controller
+C6
 PAUSE 3
 &Tool=3
-C9 'toolchanger
+C9
 &ToolName="T2 1/8 two flute003"
 MS,11.667,5.833
 JS,35.000,17.500
@@ -641,25 +641,25 @@ VD,,,&WASUNITS
         )
         # auto-spindle with wait
         self.compare_multi( *gcode_in,
-            "--toolchanger --no-comments --spindle-controller --wait-for-spindle 2 --no-header --no-show-editor",
+            "--toolchanger --no-comments --wait-for-spindle 2 --no-header --no-show-editor",
             """SA
 &WASUNITS=%(25)
 VD,,,1
 &Tool=1
-C9 'toolchanger
+C9
 &ToolName="T1 1/8 two flute002"
 MS,11.667,5.833
 JS,35.000,17.500
 &Tool=2
-C9 'toolchanger
+C9
 &ToolName="T3 Fly Cutter"
 MS,11.667,5.833
 JS,35.000,17.500
 TR,3000
-C6 'spindle-controller
+C6
 PAUSE 2
 &Tool=3
-C9 'toolchanger
+C9
 &ToolName="T2 1/8 two flute003"
 MS,11.667,5.833
 JS,35.000,17.500
