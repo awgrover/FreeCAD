@@ -181,14 +181,16 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         #print(f"###G---{gcode}---")
         self.assertEqual(expected, gcode) # most other tests have this reversed, and the diff reads wrong to me
 
-    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre='', comments=False, header=False):
+    def wrap(self, expected, inches=None, preamble='', postamble='', nativepre='', comments=False, header=False, precision=None, postfix=""):
         # compare_multi helper
         # wraps the expected path-gcode in std prefix, postfix, no-header
         # make `comments` match with --comments or --no-comments
         # lots-o-fun special cases...
 
         # hack'ish: adapt to precision
-        if m := re.search(r'\.(\d+)', expected):
+        if precision is not None:
+            z = '0' * precision
+        elif m := re.search(r'\.(\d+)', expected):
             z = '0' * len(m.group(1))
         else:
             z = '0' * 3
@@ -267,7 +269,7 @@ VD,,,{0 if inches else 1}
 """
         post = ifcomments(post)
 
-        return f"""{pre}{expected}{post}{postamble}VD,,,&WASUNITS
+        return f"""{pre}{expected}{post}{postamble}{postfix}VD,,,&WASUNITS
 """
 
     def test000(self):
@@ -598,7 +600,7 @@ PAUSE
 MS,11.667,5.833
 JS,35.000,17.500
 TR,3000
-'Change spindle speed to 3000
+'Change spindle speed to 3000 rpm
 PAUSE
 &Tool=3
 'Change tool to #3: T2, 1/8" two flute003
@@ -1161,3 +1163,63 @@ J3,10.000,10.000,10.000
             "--skip-unknown G111,G777 --no-show-editor --no-comments --no-header",
             self.wrap("")
         )
+
+    def test360(self):
+        """Probe operation"""
+
+        self.compare_multi(*"""(Probe009)
+(Begin Probing)
+(PROBEOPEN probe)
+G0 Z56.00000
+G0 X-1.000000 Y-1.000000 Z54.000000
+G38.2 F0.000000 Z50.000000
+G0 Z54.000000
+G0 X50.000000 Y-1.000000 Z54.000000
+G38.2 F0.000000 Z50.000000
+G0 Z54.000000
+(PROBECLOSE)
+G0 Z56.000000""".split("\n"),
+            "--no-show-editor --comments --no-header",
+            self.wrap("""'(Probe009)
+'(Begin Probing)
+'(PROBEOPEN probe)
+'Load the My_Variables file from Custom Cut 90 in C:\SbParts\Custom
+C#,90
+GetUsrPath, &UserDataFolder
+OPEN &UserDataFolder & "/probe.txt" FOR OUTPUT as #1
+&hit = 0
+ON INPUT(&my_ZzeroInput, 1) GOSUB CaptureZPos
+J3,,,56.000
+J3,-1.000,-1.000,54.000
+&hit = 0
+MS,0.000,5.833
+M3,,,50.000
+J3,,,54.000
+J3,50.000,-1.000,54.000
+&hit = 0
+M3,,,50.000
+J3,,,54.000
+'(PROBECLOSE)
+'Clear probe-switch-trigger
+ON INPUT(&my_ZzeroInput, 1)
+CLOSE #1
+J3,,,56.000
+""", postfix="""GOTO SkipProbeSubRoutines
+CaptureZPos:
+  ' for g38.2 probe, write the data on probe-contact
+  ' and set flag for didn't-fail
+  ' xyzab
+  WRITE #1; %(1); " ", %(2); " "; %(3); " "; %(4); " "; %(5)
+  &hit = 1
+  RETURN
+FailedToTouch:
+  ' for g38.2 probe, when
+  ' failed to trigger w/in movement
+  MSGBOX(Failed to touch...Exiting,16,Probe Failed)
+  END
+SkipProbeSubRoutines:
+""", 
+            comments=True, precision=3),
+            debug=True
+        )
+

@@ -74,6 +74,7 @@ class Refactored_Opensbp(PostProcessor):
     * This always sets the ShopBot app/machine units (see --inches --metric), no more mismatches. This defaults to your document's units.
     * G54 (fixture/coordinate-system) is accepted, but is a noop (because it's the default in Operations). Others (G55 etc) are not-accepted.
     * This does arc gcodes (G02 and G03), so helical operations should work.
+    * This does Probe (G38.2), defaults to "user-data-folder" and .txt for output filename
     * Relative movement (G91) is not supported.
     * Like most post-processors, we accept single-digit gcodes like G1, and treat them as if they were canonical 2 digit, like G01.
     * opensbp commands can be in-lined via a comment:
@@ -156,7 +157,7 @@ class Refactored_Opensbp(PostProcessor):
             "POSTAMBLE" : "",
             "POSTPROCESSOR_FILE_NAME" : __name__,
             "PREAMBLE" : "",
-            'SPINDLE_WAIT' : 3, # for manual case
+            'SPINDLE_WAIT' : 3, # for auto case
             'STOP_SPINDLE_FOR_TOOL_CHANGE' : False,
             'SUPPRESS_COMMANDS' : [ 'G54' ], # we don't have coord-systems (yet) # G99,G98,G80 added automatically
             # 'TOOL_CHANGE' : we have to generate this dynamically
@@ -168,7 +169,11 @@ class Refactored_Opensbp(PostProcessor):
             'SKIP_UNKNOWN' : [], # --skip-unknown
             'first_tool' : True,
             'last_command' : None,
+            'first_probe' : True,
         })
+        # FIXME: should be done by PostProcessor, isn't there yet
+        if 'G38.2' not in self.values['MOTION_COMMANDS']:
+            self.values['MOTION_COMMANDS'].append( 'G38.2' )
         print(f"### .values['SPINDLE_WAIT'] {self.values['SPINDLE_WAIT']}")
 
 
@@ -244,7 +249,7 @@ class Refactored_Opensbp(PostProcessor):
         _parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, but change them to a comment. E.g. --skip-unknown G55,G56. Always include G54,G99,G98,G80")
         _parser.add_argument("--native-rapid", action=argparse.BooleanOptionalAction, help="Use machine's rapid speeds, not the ToolController, default=--no-native-rapid", default=False)
         _parser.add_argument("--toolchanger", action=argparse.BooleanOptionalAction, help="Use auto-tool-changer (macro C9), default=manual", default=False)
-        _parser.add_argument("--spindle-controller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual", default=False)
+        _parser.add_argument("--spindle-controller", action=argparse.BooleanOptionalAction, help="Has software controlled spindle speed, default=manual with no spindle-wait", default=False)
         _parser.add_argument("--gcode-comments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
 
         return _parser
@@ -598,7 +603,7 @@ class ToOpenSBP:
             rez += post_lines
 
         if self._postfix:
-            rez += nl.join( self._postfix )
+            rez += nl.join( reversed(self._postfix) )
             rez += nl
 
         return rez
@@ -669,7 +674,7 @@ class ToOpenSBP:
                 raise NotImplementedError(message)
             else:
                 FreeCAD.Console.PrintWarning("Skipped:  " + message + "\n")
-                return self.comment(message, force=True) # FIXME: remove force
+                return self.comment(message)
 
     def location(self, path_command=None):
         """a message fragment of where we are, and the path_command if you want
@@ -707,10 +712,51 @@ class ToOpenSBP:
         elif m:=re.match(r'\(\s*MC_RUN_COMMAND\s+(.+)\)$', path_command.Name):
             # let's leave the original as a comment (if comments are on)
             rez += m.group(1) + "\n"
+        elif m:=re.match(r'\(PROBEOPEN (.+)\)$', path_command.Name):
+            filename = m.group(1)
+            if '.' not in filename:
+                # default .txt (really "space delimited values")
+                filename += ".txt"
 
+            # the Probe operation
+            rez += self.comment("Load the My_Variables file from Custom Cut 90 in C:\SbParts\Custom")
+            rez += "C#,90" + nl
+            if re.match(r'[^:]+:', filename):
+                # "absolute"
+                rez += f'OPEN "{filename}" FOR OUTPUT as #1' + nl
+            else:
+                # "relative"
+                rez += "GetUsrPath, &UserDataFolder" + nl
+                rez += f'OPEN &UserDataFolder & "/{filename}" FOR OUTPUT as #1' + nl
+            rez += "&hit = 0" + nl
+            rez += "ON INPUT(&my_ZzeroInput, 1) GOSUB CaptureZPos" + nl
+            # subroutines, cleanup
+            # but only once per post
+            if self.post.values['first_probe']:
+                self.post.values['first_probe'] = False
+                self._postfix.append( """GOTO SkipProbeSubRoutines
+CaptureZPos:
+  ' for g38.2 probe, write the data on probe-contact
+  ' and set flag for didn't-fail
+  ' xyzab
+  WRITE #1; %(1); " ", %(2); " "; %(3); " "; %(4); " "; %(5)
+  &hit = 1
+  RETURN
+FailedToTouch:
+  ' for g38.2 probe, when
+  ' failed to trigger w/in movement
+  MSGBOX(Failed to touch...Exiting,16,Probe Failed)
+  END
+SkipProbeSubRoutines:"""
+                )
+        elif path_command.Name == "(PROBECLOSE)":
+            rez += self.comment("Clear probe-switch-trigger")
+            rez += "ON INPUT(&my_ZzeroInput, 1)" + nl
+            rez += "CLOSE #1" + nl
+            
         return rez
 
-    @gcode('G20', 'G21')
+    @gcode('G20', 'G21') # inches, metric
     def t_units(self, path_command):
         if self.set_units:
             raise ValueError("You can only set the units once, already {self.set_units['command']} at {self.set_units['at']}. You tried again at {self.location(path_command)}")
@@ -846,7 +892,11 @@ class ToOpenSBP:
     def t_spindle_speed(self, path_command):
         native = ''
 
-        native += f"TR,{int(path_command.Parameters['S'])}\n" # rpm units
+        if 'S' in path_command.Parameters:
+            native += f"TR,{int(path_command.Parameters['S'])}\n" # rpm units
+            new_speed = f"{int(path_command.Parameters['S'])} rpm"
+        else:
+            new_speed = 'start'
 
         if self.post.arguments.spindle_controller:
             # stop, I think:
@@ -854,7 +904,7 @@ class ToOpenSBP:
             if self.post.values['SPINDLE_WAIT'] > 0:
                 native += f"PAUSE {int(self.post.values['SPINDLE_WAIT'])}\n"
         else:
-            native += f"'Change spindle speed to {int(path_command.Parameters['S'])}\n" # prompt
+            native += f"'Change spindle speed to {new_speed}\n" # prompt
             native += "PAUSE\n" # causes a modal to ask "ok?"
 
         return native
@@ -986,11 +1036,51 @@ class ToOpenSBP:
 
     @gcode('M05')
     def t_stop_spindle(self, command):
-        return 'C5\n'
+        return 'C7\n'
 
-    @gcode('M02')
+    @gcode('M02', 'M30')
     def t_stop(self, command):
         return 'END\n'
+
+    @gcode('M08')
+    def t_coolant_on(self, command):
+        return 'C99\n' # FIXME
+
+    @gcode('M09')
+    def t_cooland_off(self, command):
+        return 'C99\n' # FIXME
+
+    @gcode('G38.2')
+    def t_probe(self, command):
+
+        # when written, probe generated F0.000,
+        # which doesn't make sense(?), so use the Z speed
+        speed = command.Parameters.get('F', None)
+        if speed is not None:
+            speed = float(speed)
+        if speed == 0.0:
+            speed = None
+        if speed is None:
+            print(f"### ms {self.current_location['ms']}")
+            speed = self.current_location['ms'][1] # out of [ xy, z ]
+
+        axis = " ".join([ f"{a}{command.Parameters[a]}" for a in self.PositionAxis if a in command.Parameters])
+
+        # PROBEOPEN sets up the contact-detect, so G38.2 are just moves
+        rez = ""
+        rez += "&hit = 0" + nl # for did-we-hit OR fail
+        g = f"G01 F{speed} {axis}"
+        print(f"### probe g01: {g}")
+
+        was = self.post.arguments.speed_modal
+        try:
+            self.post.arguments.speed_modal = True
+            rez += self.t_move( Path.Command(f"G01 F{speed} {axis}" ) )
+        finally:
+            self.post.arguments.speed_modal = was
+
+        print(f"### G38:\n{rez}---")
+        return rez
 
     def set_speed( self, path_command ):
         # For non-rapid, F applies to the vector of all the axis
