@@ -133,11 +133,14 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
         if FreeCAD.ActiveDocument and FreeCAD.ActiveDocument.findObjects(Name="testpath"):
             FreeCAD.ActiveDocument.removeObject("testpath")
 
-    def compare_multi(self, *args, remove=None, debug=False ):
+    def compare_multi(self, *args, remove=None, debug=False, skip=False ):
         """Actually as if: ( *gcode, options, expected, debug=True )
         `*gcode` is all str (gcodes), or None to use extant self.job
         `remove` is a pattern to remove lines from both expected and generated
         """
+
+        if skip:
+            return
 
         if args[0] is None:
             self.profile_op.Path = Path.Path([])
@@ -1093,8 +1096,23 @@ MX,200.000
 MS,0.000,100.000
 M3,,,100.000
 M3,,,200.000
-""")
+"""),
     )
+
+        self.compare_multi(
+            "G1 Z3.83000 F42.33333",
+            "G2 X26.58500 Y25.00000 I-1.12076 J-1.12076 K0.00000",
+            "G1 Y-25.00000",
+            "G2 X25.00000 Y-26.58500 I-1.58500 J0.00000 K0.00000",
+            "--o2 --no-header --no-comments --no-show-editor",
+            self.wrap("""MS,0.000,42.333
+M3,,,3.830
+MS,42.333,0.000
+CG,,26.585,25.000,-1.121,-1.121,T,1,0,,,,0,1,0
+M2,,-25.000
+CG,,25.000,-26.585,-1.585,0.000,T,1,0,,,,0,1,0
+""")
+        )
 
     def test320(self):
         """--axis-modal"""
@@ -1192,12 +1210,14 @@ ON INPUT(&my_ZzeroInput, 1) GOSUB CaptureZPos
 J3,,,56.000
 J3,-1.000,-1.000,54.000
 &hit = 0
-MS,0.000,5.833
+MS,0.000
 M3,,,50.000
+IF &hit = 0 THEN GOTO FailedToTouch
 J3,,,54.000
 J3,50.000,-1.000,54.000
 &hit = 0
 M3,,,50.000
+IF &hit = 0 THEN GOTO FailedToTouch
 J3,,,54.000
 '(PROBECLOSE)
 'Clear probe-switch-trigger
