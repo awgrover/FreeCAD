@@ -75,7 +75,7 @@ class Refactored_Opensbp(PostProcessor):
     * Many defaults have changed: read the tooltip for the Arguments
     * This always tests the ShopBot app/machine units (see --inches --metric), and on the machine will give an error and exit if in the wrong units. No more mismatches.
     * G54 (fixture/coordinate-system) is accepted, but is a noop (because it's the default in Operations). Others (G55 etc) are not-accepted.
-    * Note the default of --tool-change == False. Use that for manual tool change, but you only get 1 tool per file. True means call C9. Note: C9 seems to not work with G21/--metric.
+    * Note the default of --tool-change == False. Use that for manual tool change, but you only get 1 tool per file. True means call C9. Note: C9 (manual-tool-change) seems to not work (corrupts units)?
     * This does arc gcodes (G02 and G03), so helical operations should work.
     * This does Probe (G38.2), defaults to "user-data-folder" and .txt for output filename
     * Relative movement (G91) is not supported.
@@ -630,6 +630,8 @@ class ToOpenSBP:
         """
         if path_command.Name.startswith('('):
             if m := (
+                re.match(r'\(Path: ([^)]+)\)', path_command.Name)
+                or
                 re.match(r'\(Begin operation: ([^)]+)\)', path_command.Name)
                 or
                 re.match(r'\(Begin (preamble)\)', path_command.Name)
@@ -834,7 +836,8 @@ SkipProbeSubRoutines:"""
                 self.first_tool = False
                 rez = ''
             else:
-                raise NotImplementedError(f"2nd tool, {tool_number}, when --no-tool-changer at {self.location(path_command)}")
+                raise NotImplementedError(f"2nd tool can't be done, #{tool_number}, no way to change-tool when --no-tool-changer at {self.location(path_command)}")
+
 
         rez += self.set_initial_speeds(tool_controller, path_command)
 
@@ -972,37 +975,32 @@ SkipProbeSubRoutines:"""
 
         txt += "CG,"
         txt += "," # no diameter
+
         # end
-        if 'X' not in path_command.Parameters and 'Y' not in path_command.Parameters:
-            # circle
-            txt += ","
-            txt += ","
-        else:
-            # segment
-            if 'X' in path_command.Parameters:
-                txt += format(path_command.Parameters["X"], f".{self.post.values['FEED_PRECISION']}f") + ","
-            else:
-                txt += ","
-            if 'Y' in path_command.Parameters:
-                txt += format(path_command.Parameters["Y"], f".{self.post.values['FEED_PRECISION']}f") + ","
-            else:
-                txt += ","
+        # Omitting XY has special meaning to ShopBot, it is not the same as modal-axis
+        # The PostProcess code will drop the XYZ axis on --axis-modal, but we need it:
+        x = path_command.Parameters.get('X', self.current_location['X'] )
+        y = path_command.Parameters.get('Y', self.current_location['Y'] )
+        txt += format(x, f".{self.post.values['FEED_PRECISION']}f") + ","
+        txt += format(y, f".{self.post.values['FEED_PRECISION']}f") + ","
+
         # Center is at offset:
         txt += format(path_command.Parameters["I"] if 'I' in path_command.Parameters.keys() else 0.0, f".{self.post.values['FEED_PRECISION']}f")  + ","
         txt += format(path_command.Parameters["J"] if 'J' in path_command.Parameters.keys() else 0.0, f".{self.post.values['FEED_PRECISION']}f")  + ","
         txt += "T" + "," # move on diameter
         txt += dirstring + ","
 
-        if 'Z' in path_command.Parameters:
-            # Z causes a helical, "causes the defined plunge to be made gradually as the cutter is circling down"
-            txt += format(dz, f".{self.post.values['FEED_PRECISION']}f") + ","
-        else:
-            txt += "0," # Z is relative for CG
+        if 'Z' not in path_command.Parameters:
+            dz = 0
+        # Z causes a helical, "causes the defined plunge to be made gradually as the cutter is circling down"
+        # Note, dz is actual distance vector, but ShopBot uses -dz to mean "plunge" relative
+        txt += format(-dz, f".{self.post.values['FEED_PRECISION']}f") + ","
 
         txt += "," # repetitions
         txt += "," # proportion-x
         txt += "," # proportion-y
-        if 'Z' in path_command.Parameters:
+
+        if dz != 0.0:
             # helical cases
             # we don't do "bottom pass" (4) because FreeCAD seems to do that and it's not a g-code thing anyway
             if 'X' not in path_command.Parameters and 'Y' not in path_command.Parameters:
@@ -1018,9 +1016,8 @@ SkipProbeSubRoutines:"""
         txt += "0" # no move before plunge
 
         # actual Z, opensbp plunge is a delta, note the actual Z as a comment
-        if 'Z' in path_command.Parameters:
-            txt += " ' Z" + format(path_command.Parameters["Z"], f".{self.post.values['FEED_PRECISION']}f")
-        #txt += self.comment(path_command.Name).rstrip()
+        z = path_command.Parameters.get('Z', self.current_location['Z'] )
+        txt += " ' Z" + format(z, f".{self.post.values['FEED_PRECISION']}f")
         txt += "\n"
         return txt
 
@@ -1172,7 +1169,7 @@ SkipProbeSubRoutines:"""
             start_position = [ float(self.current_location[a] or 0) for a in 'XYZ' ]
             center_offset = [ float(path_command.Parameters.get(a,None) or 0) for a in 'IJK' ] # k always 0
             end_position = [ float(path_command.Parameters.get(k, start_position[i])) for i,k in enumerate('XYZ') ]
-            z_distance = abs(end_position[2] - start_position[2])
+            z_distance = start_position[2] - end_position[2]
 
             # If the XY is omitted, it means a whole circle, and arc-length-3d will give that
             xy_distance, distance = arc_length_3d(
@@ -1229,7 +1226,16 @@ SkipProbeSubRoutines:"""
 
         # only elide ''
         # 0.05 seems to be minimum on ShopBot
-        speeds = [ s if s != '' and s >= 0.05 else '' for s in speeds ]
+        min_speed = 0.05 if self.post.values['UNITS']=='G20' else 1.30 # inches, or mm
+        def gtmin(s):
+            if s == '':
+                return s
+            elif s >= min_speed:
+                return s
+            else:
+                return min_speed
+
+        speeds = [ gtmin(s) for s in speeds ]
         speeds = [ (format(s, f'.{self.post.values["AXIS_PRECISION"]}f') if s !='' else '') for s in speeds ]
         print(f"### fmt speeds {speeds}")
 
