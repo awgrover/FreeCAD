@@ -819,27 +819,31 @@ SkipProbeSubRoutines:"""
 
         tool_controller = self.post._job.Tools.Group[ tool_number - 1 ]
         tool_name = f"{tool_controller.Label}, {tool_controller.Tool.Label}" # not sure if we want both .Label's, just trying to help the operator
+        safe_tool_name = re.sub(r'[^A-Za-z0-9/_ .-]', '', tool_name)
+
+        rez = []
+
+        if not self.post.values['OUTPUT_TOOL_CHANGE']:
+            rez.append( self.comment(f"First change tool, should already be #{tool_number}: {safe_tool_name}", force=True).rstrip() )
+
+        rez += [
+            f"&Tool={tool_number}",
+            f'&ToolName="{safe_tool_name}"',
+        ]
 
         if self.post.values['OUTPUT_TOOL_CHANGE']:
-            safe_tool_name = re.sub(r'[^A-Za-z0-9/_ .-]', '', tool_name)
-
             # automatic no prompt, or manual prompt (depends on correct shopbot setup)
-            rez = [
-                f"&Tool={tool_number}",
-                f'&ToolName="{safe_tool_name}"',
-                "C9",
-            ]
+            rez.append("C9")
 
-            rez = nl.join(rez) + nl
         else:
             if self.first_tool:
                 self.first_tool = False
-                rez = ''
             else:
                 raise NotImplementedError(f"2nd tool can't be done, #{tool_number}, no way to change-tool when --no-tool-changer at {self.location(path_command)}")
 
 
-        rez += self.set_initial_speeds(tool_controller, path_command)
+        rez.append( self.set_initial_speeds(tool_controller, path_command).rstrip() )
+        rez = nl.join( (x for x in rez if x != '') ) + nl
 
         return rez
 
@@ -1100,6 +1104,10 @@ SkipProbeSubRoutines:"""
         # For non-rapid, F applies to the vector of all the axis
         # For rapid, full speed on the axis from the toolchange settings
         #   (so no output here)
+        # Projects F into XY plane, and Z plane for shopbot
+        # Elides MS values if not change or 0.0 (shopbot doesn't like 0)
+        # Elides trailing ,
+        # Elides whole MS if no values
 
         native_command = None
         if path_command.Name == "G00":
@@ -1109,6 +1117,8 @@ SkipProbeSubRoutines:"""
             return (0,'')
         else:
             native_command = 'MS'
+
+        print(f"### SETSPEED {path_command.toGCode()}")
 
         last_position = [ float(self.current_location[a] or 0) for a in self.PositionAxis ]
         def fmt_diff( l ):
@@ -1122,6 +1132,7 @@ SkipProbeSubRoutines:"""
         if path_command.Name == 'G01':
             d_axis = list(map(operator.sub, self.end_location, last_position))
             print(f"### d_axis {fmt_diff(d_axis)}")
+
             squared_d_axis = [ v**2 for v in d_axis]
             distance = math.sqrt( sum( squared_d_axis ) )
             z_distance = abs(d_axis[2])
@@ -1181,7 +1192,7 @@ SkipProbeSubRoutines:"""
 
             axis = list('XYZ')
 
-        distances_for_speed = [ xy_distance, z_distance ]
+        distances_for_speed = [ abs(xy_distance), abs(z_distance) ] # abs(xy) shouldn't be necessary
         print(f"### dist {distance} d xy,z {distances_for_speed}")
 
         if path_command.Name == 'G00':
@@ -1194,6 +1205,8 @@ SkipProbeSubRoutines:"""
 
         # feed motions
         else:
+            # FIXME: AB speeds not handled yet
+
             f = path_command.Parameters.get('F', None)
             print(f"### command f {f}")
             if f is None:
@@ -1203,8 +1216,16 @@ SkipProbeSubRoutines:"""
                 raise ValueError(f"No previous F speed at {self.location(path_command)}")
             f = float(f)
 
-            # FIXME: AB not handled yet
-            speeds = [ ((f * d/distance) if distance!=0 else 0) for d in distances_for_speed ]
+            # if only in xy, or only in z, then speed=F
+            if xy_distance != 0.0 and z_distance == 0.0:
+                speeds = [ f, 0.0 ]
+            elif xy_distance == 0.0 and z_distance != 0.0:
+                speeds = [ 0.0, f ]
+                
+            else:
+
+                # FIXME: AB not handled yet
+                speeds = [ ((f * d/distance) if distance!=0 else 0) for d in distances_for_speed ]
 
         if native_command == 'MS':
 
@@ -1223,6 +1244,7 @@ SkipProbeSubRoutines:"""
             print(f"### Saved speeds ms {self.current_location['ms']}")
 
         print(f"### set_speed axis {axis}")
+        print(f"### speeds {speeds}")
 
         # only elide ''
         # 0.05 seems to be minimum on ShopBot
@@ -1230,10 +1252,12 @@ SkipProbeSubRoutines:"""
         def gtmin(s):
             if s == '':
                 return s
-            elif s >= min_speed:
+            elif abs(s) >= min_speed:
                 return s
-            else:
-                return min_speed
+            elif s == 0.0:
+                return ''
+            elif abs(s) < min_speed:
+                return min_speed * (-1 if s<0 else 1)
 
         speeds = [ gtmin(s) for s in speeds ]
         speeds = [ (format(s, f'.{self.post.values["AXIS_PRECISION"]}f') if s !='' else '') for s in speeds ]
@@ -1241,6 +1265,7 @@ SkipProbeSubRoutines:"""
 
         # cleans up trailing , when trailing speeds elided
         cmd = f"{native_command},{','.join(speeds)}".rstrip(',')
+
         # If there is no speed to set (e.g. the move ends up as delta-0), no MS needed
         if cmd == "MS":
             cmd = ''

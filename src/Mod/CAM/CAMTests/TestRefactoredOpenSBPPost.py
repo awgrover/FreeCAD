@@ -236,9 +236,7 @@ JS,{fmt(RapidSpeed/60)},{fmt(RapidSpeed/2/60)}"""
 """
         pre = [ f"""{hdr}'(Begin preamble)
 {preamble}SA
-&WASUNITS=%(25)
-'Units metric
-VD,,,{0 if inches else 1}
+IF %(25) = {0 if not inches else 1} THEN GOTO WrongUnits
 {nativepre}'(Begin operation: Fixture)
 '(Machine units: mm/s)
 '(Path: Fixture)
@@ -249,11 +247,11 @@ VD,,,{0 if inches else 1}
 '(Path: TC: Default Tool)
 '(TC: Default Tool)
 '(Begin toolchange)
-&Tool=1
+C7
 """,
             # don't remove these comments
-            """'Change tool to #1: TC: Default Tool, Endmill
-'First change tool, should already be #1: TC: Default Tool, Endmill
+            """'First change tool, should already be #1: TC Default Tool Endmill
+&Tool=1
 &ToolName="TC Default Tool Endmill"
 """,
             f"""{speeds}
@@ -267,13 +265,19 @@ VD,,,{0 if inches else 1}
         pre[2] = ifcomments(pre[2])
         pre = "".join(pre)
 
-        post = """'(Finish operation: Profile)
+        post = f"""'(Finish operation: Profile)
 '(Begin postamble)
+{postamble}{postfix}GOTO AfterWrongUnits
+WrongUnits:
+  if %(25) = 0 THEN &shopbot_which="inches"
+  if %(25) = 1 THEN &shopbot_which="mm"
+    MSGBOX("Post-processor wants {'G21/--metric' if not inches else 'G20/--inches'} but ShopBot is " & &shopbot_which & ". Change Units in ShopBot and try again.",0,"Change Units")
+    ENDALL
+AfterWrongUnits:
 """
         post = ifcomments(post)
 
-        return f"""{pre}{expected}{post}{postamble}{postfix}VD,,,&WASUNITS
-"""
+        return f"""{pre}{expected}{post}"""
 
     def test000(self):
         """Test Output Generation.
@@ -379,7 +383,7 @@ M3,0.39,0.79,1.18
         self.compare_multi(
             f"G1 F{f} X10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,{f},0.000
+            self.wrap(f"""MS,{f}
 MX,10.000
 """)
         )
@@ -388,7 +392,7 @@ MX,10.000
         self.compare_multi(
             f"G1 F{f} Y10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,{f},0.000
+            self.wrap(f"""MS,{f}
 M2,,10.000
 """)
         )
@@ -397,7 +401,7 @@ M2,,10.000
         self.compare_multi(
             f"G1 F{f} Z10",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,0.000,{f}
+            self.wrap(f"""MS,,{f}
 M3,,,10.000
 """)
         )
@@ -407,7 +411,7 @@ M3,,,10.000
         self.compare_multi(
             f"G1 F{f} X10 Y0 Z0",
             "--no-header --no-comments --metric --no-show-editor",
-            self.wrap(f"""MS,{f},0.000
+            self.wrap(f"""MS,{f}
 M3,10.000,0.000,0.000
 """)
         )
@@ -425,11 +429,11 @@ M3,10.000,0.000,0.000
             f"G1 F{f} Z1",
             "--no-header --no-comments --metric --no-show-editor",
             self.wrap(f"""J3,10.000,10.000,10.000
-MS,{f},0.000
+MS,{f}
 MX,1.000
-MS,{f},0.000
+MS,{f}
 M2,,1.000
-MS,0.000,{f}
+MS,,{f}
 M3,,,1.000
 """)
         )
@@ -440,7 +444,7 @@ M3,,,1.000
             f"G1 F{f} X1 Y1",
             "--no-header --no-comments --metric --no-show-editor",
             self.wrap(f"""J3,10.000,10.000,10.000
-MS,{f},0.000
+MS,{f}
 M2,1.000,1.000
 """)
         )
@@ -477,7 +481,7 @@ M3,-2.000,-3.000,-4.000
             "(none)",
             f"--no-header --no-comments --preamble='G0 Z50\nG1 F700 X20' --no-show-editor --metric",
             self.wrap("", preamble="""J3,,,50.000
-MS,700.000,0.000
+MS,700.000
 MX,20.000
 """)
         )
@@ -491,7 +495,7 @@ MX,20.000
             "(none)",
             "--no-header --no-comments --postamble='G0 Z55\nG1 F700 X22' --no-show-editor",
         self.wrap('', postamble="""J3,,,55.000
-MS,700.000,0.000
+MS,700.000
 MX,22.000
 """)
         )
@@ -529,7 +533,6 @@ MX,22.000
             # note no second MS, because no delta-position
             self.wrap("""MS,6.972,9.354
 M3,10.000,20.000,30.000
-MS,0.000,0.000
 M3,10.000,20.000,30.000
 """)
         )
@@ -585,11 +588,10 @@ J3,,,31.000
         gcode_in = [ "M6 T2", "M3 S3000", "M6 T3" ]
 
         # tool change: manual
-        self.compare_multi( *gcode_in,
-            "--no-header --no-comments --comments --no-show-editor",
-            """SA
-&WASUNITS=%(25)
-VD,,,1
+        with self.assertRaises(NotImplementedError) as context:
+            self.compare_multi( *gcode_in,
+                "--no-header --no-comments --comments --no-show-editor",
+                """SA
 &Tool=1
 'Change tool to #1: T1, 1/8" two flute002
 'First change tool, should already be #1: T1, 1/8" two flute002
@@ -611,63 +613,52 @@ PAUSE
 &ToolName="T2 1/8 two flute003"
 MS,11.667,5.833
 JS,35.000,17.500
-VD,,,&WASUNITS
 """,
-        )
+            )
+        self.assertTrue("2nd tool can't be done," in str(context.exception))
+
+        expect = """SA
+IF %(25) = 0 THEN GOTO WrongUnits
+C7
+&Tool=1
+&ToolName="T1 1/8 two flute002"
+C9
+MS,11.667,5.833
+JS,35.000,17.500
+C7
+&Tool=2
+&ToolName="T3 Fly Cutter"
+C9
+MS,11.667,5.833
+JS,35.000,17.500
+TR,3000
+C6
+PAUSE {}
+C7
+&Tool=3
+&ToolName="T2 1/8 two flute003"
+C9
+MS,11.667,5.833
+JS,35.000,17.500
+GOTO AfterWrongUnits
+WrongUnits:
+  if %(25) = 0 THEN &shopbot_which="inches"
+  if %(25) = 1 THEN &shopbot_which="mm"
+    MSGBOX("Post-processor wants G21/--metric but ShopBot is " & &shopbot_which & ". Change Units in ShopBot and try again.",0,"Change Units")
+    ENDALL
+AfterWrongUnits:
+"""
 
         # both tool and spindle: auto
         self.compare_multi( *gcode_in,
-            "--toolchanger --no-comments --no-header --no-show-editor",
-            """SA
-&WASUNITS=%(25)
-VD,,,1
-&Tool=1
-C9
-&ToolName="T1 1/8 two flute002"
-MS,11.667,5.833
-JS,35.000,17.500
-&Tool=2
-C9
-&ToolName="T3 Fly Cutter"
-MS,11.667,5.833
-JS,35.000,17.500
-TR,3000
-C6
-PAUSE 3
-&Tool=3
-C9
-&ToolName="T2 1/8 two flute003"
-MS,11.667,5.833
-JS,35.000,17.500
-VD,,,&WASUNITS
-"""
+            "--tool_change --no-comments --no-header --no-show-editor",
+            expect.format(3) # wait time
         )
+
         # auto-spindle with wait
         self.compare_multi( *gcode_in,
-            "--toolchanger --no-comments --wait-for-spindle 2 --no-header --no-show-editor",
-            """SA
-&WASUNITS=%(25)
-VD,,,1
-&Tool=1
-C9
-&ToolName="T1 1/8 two flute002"
-MS,11.667,5.833
-JS,35.000,17.500
-&Tool=2
-C9
-&ToolName="T3 Fly Cutter"
-MS,11.667,5.833
-JS,35.000,17.500
-TR,3000
-C6
-PAUSE 2
-&Tool=3
-C9
-&ToolName="T2 1/8 two flute003"
-MS,11.667,5.833
-JS,35.000,17.500
-VD,,,&WASUNITS
-"""
+            "--tool_change --no-comments --wait-for-spindle 2 --no-header --no-show-editor",
+            expect.format(2) # wait time
         )
 
 
@@ -683,37 +674,7 @@ VD,,,&WASUNITS
 
         self.compare_multi( "(comment)",
             "--no-header --comments --no-show-editor",
-            """'(Begin preamble)
-SA
-&WASUNITS=%(25)
-'Units metric
-VD,,,1
-'(Begin operation: Fixture)
-'(Machine units: mm/s)
-'(Path: Fixture)
-'( G54 )
-'(Finish operation: Fixture)
-'(Begin operation: TC: Default Tool)
-'(Machine units: mm/s)
-'(Path: TC: Default Tool)
-'(TC: Default Tool)
-'(Begin toolchange)
-&Tool=1
-'Change tool to #1: TC: Default Tool, Endmill
-'First change tool, should already be #1: TC: Default Tool, Endmill
-&ToolName="TC Default Tool Endmill"
-'set speeds: TC: Default Tool
-MS,11.667,5.833
-JS,35.000,17.500
-'(Finish operation: TC: Default Tool)
-'(Begin operation: Profile)
-'(Machine units: mm/s)
-'(Path: Profile)
-'(comment)
-'(Finish operation: Profile)
-'(Begin postamble)
-VD,,,&WASUNITS
-"""
+            self.wrap("'(comment)\n", comments=True)
         )
 
     def test100(self):
@@ -743,20 +704,14 @@ M5,0.3937,0.7874,1.1811,40.0000,50.0000
         self.compare_multi(
             "G1 X10 Y20 Z30 A40 B50",
             "--no-header --no-comments --inches --no-show-editor",
-            """&WASUNITS=%(25)
-VD,,,0
-M5,0.3937,0.7874,1.1811,40.0000,50.0000
-VD,,,&WASUNITS
+            """M5,0.3937,0.7874,1.1811,40.0000,50.0000
 """
         )
 
         self.compare_multi(
             "G1 X10 Y20 Z30 A40 B50",
             "--no-header --no-comments --no-show-editor --inches --ab-is-distance",
-            """&WASUNITS=%(25)
-VD,,,0
-M5,0.3937,0.7874,1.1811,1.5748,1.9685
-VD,,,&WASUNITS
+            """M5,0.3937,0.7874,1.1811,1.5748,1.9685
 """
         )
 
@@ -959,14 +914,11 @@ verbatim-post
         with self.assertRaises(NotImplementedError) as context:
             self.compare_multi( "G91", c, c, "G90", c, c,
                 "--no-header --no-comments --modal --no-show-editor",
-                """&WASUNITS=%(25)
-VD,,,1
-SR 'RELATIVE
+                """SR 'RELATIVE
 J3,10.000,20.000,30.000
 J3,10.000,20.000,30.000
 SA 'ABSOLUTE
 J3,10.000,20.000,30.000
-VD,,,&WASUNITS
 """
             )
         self.assertTrue('gcode not handled' in str(context.exception))
@@ -990,7 +942,7 @@ VD,,,&WASUNITS
             self.assertIn(f"'{bad[0]}'",str(context.exception))
 
         self.compare_multi(
-            "G0 Z5.00", # the CG plunge is relative, so start from non-0 to test
+            "G0 Z5.00", # the arc-CG plunge is relative, so start from non-0 to test
             f"G2 F{FeedSpeed} X10 Y20 Z40 I1 J2", # helical segment
             "G0 Z5.01",
             f"G2 F{FeedSpeed-100} Z40.01 I1 J2", # helical circle
@@ -1002,10 +954,10 @@ MS,137.749,686.313
 CG,,10.000,20.000,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.000
 J3,,,5.010
 MS,223.515,556.813
-CG,,,,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.010
+CG,,10.000,20.000,1.000,2.000,T,1,35.000,,,,3,1,0 ' Z40.010
 J3,,,5.020
-MS,500.000,0.000
-CG,,50.000,60.020,1.000,2.000,T,1,0,,,,0,1,0
+MS,500.000
+CG,,50.000,60.020,1.000,2.000,T,1,0.000,,,,0,1,0 ' Z5.020
 """)
         )
 
@@ -1050,19 +1002,19 @@ PAUSE
             self.wrap("""J3,0.000,0.000,5.000
 '( G73 X1.00000 Y2.00000 Z0.00000 R5.00000 Q1.50000 F123.00000 )
 J2,1.000,2.000
-MS,0.000,123.000
+MS,,123.000
 M3,,,3.500
 J3,,,3.750
 J3,,,3.575
-MS,0.000,123.000
+MS,,123.000
 M3,,,2.000
 J3,,,2.250
 J3,,,2.075
-MS,0.000,123.000
+MS,,123.000
 M3,,,0.500
 J3,,,0.750
 J3,,,0.575
-MS,0.000,123.000
+MS,,123.000
 M3,,,0.000
 J3,,,5.000
 """, comments=True),
@@ -1090,10 +1042,10 @@ PRINT "Hello"
             "G1 F100 Z200",
             "--speed-modal --no-header --no-comments --no-show-editor",
             self.wrap("""J3,10.000,10.000,10.000
-MS,100.000,0.000
+MS,100.000
 MX,100.000
 MX,200.000
-MS,0.000,100.000
+MS,,100.000
 M3,,,100.000
 M3,,,200.000
 """),
@@ -1105,12 +1057,12 @@ M3,,,200.000
             "G1 Y-25.00000",
             "G2 X25.00000 Y-26.58500 I-1.58500 J0.00000 K0.00000",
             "--o2 --no-header --no-comments --no-show-editor",
-            self.wrap("""MS,0.000,42.333
+            self.wrap("""MS,,42.333
 M3,,,3.830
-MS,42.333,0.000
-CG,,26.585,25.000,-1.121,-1.121,T,1,0,,,,0,1,0
+MS,42.333
+CG,,26.585,25.000,-1.121,-1.121,T,1,0.000,,,,0,1,0 ' Z3.830
 M2,,-25.000
-CG,,25.000,-26.585,-1.585,0.000,T,1,0,,,,0,1,0
+CG,,25.000,-26.585,-1.585,0.000,T,1,0.000,,,,0,1,0 ' Z3.830
 """)
         )
 
@@ -1203,19 +1155,18 @@ G0 Z56.000000""".split("\n"),
 '(PROBEOPEN probe)
 'Load the My_Variables file from Custom Cut 90 in C:\SbParts\Custom
 C#,90
-GetUsrPath, &UserDataFolder
-OPEN &UserDataFolder & "/probe.txt" FOR OUTPUT as #1
+OPEN "probe.txt" FOR OUTPUT as #1
 &hit = 0
-ON INPUT(&my_ZzeroInput, 1) GOSUB CaptureZPos
 J3,,,56.000
 J3,-1.000,-1.000,54.000
 &hit = 0
-MS,0.000
+ON INPUT(&my_ZzeroInput, 1) GOSUB CaptureZPos
 M3,,,50.000
 IF &hit = 0 THEN GOTO FailedToTouch
 J3,,,54.000
 J3,50.000,-1.000,54.000
 &hit = 0
+ON INPUT(&my_ZzeroInput, 1) GOSUB CaptureZPos
 M3,,,50.000
 IF &hit = 0 THEN GOTO FailedToTouch
 J3,,,54.000
@@ -1229,7 +1180,7 @@ CaptureZPos:
   ' for g38.2 probe, write the data on probe-contact
   ' and set flag for didn't-fail
   ' xyzab
-  WRITE #1; %(1); " ", %(2); " "; %(3); " "; %(4); " "; %(5)
+  WRITE #1; %(1); " "; %(2); " "; %(3); " "; %(4); " "; %(5)
   &hit = 1
   RETURN
 FailedToTouch:
