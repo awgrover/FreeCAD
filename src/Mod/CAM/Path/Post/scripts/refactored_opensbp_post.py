@@ -68,7 +68,7 @@ nl = "\n" # particularly useful in a f-string
 PreventGuiTimeout = 1 # seconds
 
 class Refactored_Opensbp(PostProcessor):
-    """For ShopBot (or other opensbp controllers), this is a CAM postprocessor. 
+    """For ShopBot (or other opensbp controllers), this is a CAM postprocessor.
     We have to translate gcode to opensbp, so the output is NOT gcode.
     Typically, you'd want a .sbp file extension.
 
@@ -254,7 +254,7 @@ class Refactored_Opensbp(PostProcessor):
         _parser.add_argument("--filter","--filters", help="a ',' list of filters in FreeCAD.getUserMacroDir()/post to run on the gcode of each Path object, before we see it (i.e. cleanups). A class of same (camelcase) name as file, __init__(self,objectslist, filename, argstring), .filter(eachpathobj, its-.Commands) -> gcode")
         _parser.add_argument("--abort-on-unknown", action=argparse.BooleanOptionalAction, help="Generate an error and fail if an unknown gcode is seen. default=True", default=True)
         _parser.add_argument("--skip-unknown", help="if --abort-on-unknown, allow these gcodes, but change them to a comment. E.g. --skip-unknown G55,G56. Always include G54,G99,G98,G80")
-        _parser.add_argument("--native-rapid", action=argparse.BooleanOptionalAction, help="Use machine's rapid speeds, not the ToolController, default=--no-native-rapid", default=False)
+        _parser.add_argument("--native-rapid", action=argparse.BooleanOptionalAction, help="Use machine's rapid speeds, not the ToolController (never uses zeros), default=--no-native-rapid", default=False)
         _parser.add_argument("--gcode-comments", action=argparse.BooleanOptionalAction, help="Add the original gcode as a comment, for debugging", default=False)
 
         return _parser
@@ -568,10 +568,10 @@ class ToOpenSBP:
                 else:
                     raise Exception('Relative G91 not supported yet')
                     # FIXME: not tested (relative mode not fully implemented):
-                    self.end_location = [
-                        float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
-                        for a in self.current_location if a in self.PositionAxis
-                    ]
+                    #self.end_location = [
+                    #    float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
+                    #    for a in self.current_location if a in self.PositionAxis
+                    #]
                 print(f"### end at {self.end_location}")
 
             if skip_modal:
@@ -592,7 +592,7 @@ class ToOpenSBP:
                 # all other parameters (especially F)
                 for a,v in path_command.Parameters.items():
                     if a not in self.PositionAxis:
-                        self.current_location[a] = path_command.Parameters[a]
+                        self.current_location[a] = v
                 print(f"### current {self.current_location}")
 
             self.post.values['last_command'] = path_command
@@ -734,7 +734,7 @@ class ToOpenSBP:
 
             # can't get &UserDataFolder to catenate properly anywhere...
             # so, just filename
-            rez += self.comment("Load the My_Variables file from Custom Cut 90 in C:\SbParts\Custom")
+            rez += self.comment("Load the My_Variables file from Custom Cut 90 in C:\\SbParts\\Custom")
             rez += "C#,90" + nl
             #if re.match(r'[^:]+:', filename):
             #    # "absolute"
@@ -769,7 +769,7 @@ SkipProbeSubRoutines:"""
             rez += self.comment("Clear probe-switch-trigger")
             rez += "ON INPUT(&my_ZzeroInput, 1)" + nl
             rez += "CLOSE #1" + nl
-            
+
         return rez
 
     @gcode('G20', 'G21') # inches, metric
@@ -913,11 +913,8 @@ SkipProbeSubRoutines:"""
 
         if 'S' in path_command.Parameters:
             native += f"TR,{int(path_command.Parameters['S'])}\n" # rpm units
-            new_speed = f"{int(path_command.Parameters['S'])} rpm"
-        else:
-            new_speed = 'start'
 
-        # macro apparently will do the dialog-box if you don't have a controlled spindle
+        # macro will do the dialog-box if you don't have a controlled spindle
         native += "C6\n"
 
         if self.post.values['SPINDLE_WAIT'] > 0:
@@ -996,6 +993,7 @@ SkipProbeSubRoutines:"""
 
         if 'Z' not in path_command.Parameters:
             dz = 0
+
         # Z causes a helical, "causes the defined plunge to be made gradually as the cutter is circling down"
         # Note, dz is actual distance vector, but ShopBot uses -dz to mean "plunge" relative
         txt += format(-dz, f".{self.post.values['FEED_PRECISION']}f") + ","
@@ -1221,7 +1219,7 @@ SkipProbeSubRoutines:"""
                 speeds = [ f, 0.0 ]
             elif xy_distance == 0.0 and z_distance != 0.0:
                 speeds = [ 0.0, f ]
-                
+
             else:
 
                 # FIXME: AB not handled yet
@@ -1258,6 +1256,7 @@ SkipProbeSubRoutines:"""
                 return ''
             elif abs(s) < min_speed:
                 return min_speed * (-1 if s<0 else 1)
+            # that's all the cases
 
         speeds = [ gtmin(s) for s in speeds ]
         speeds = [ (format(s, f'.{self.post.values["AXIS_PRECISION"]}f') if s !='' else '') for s in speeds ]
