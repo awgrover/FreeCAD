@@ -78,7 +78,7 @@ class Refactored_Opensbp(PostProcessor):
     * G54 (fixture/coordinate-system) is accepted, but is a noop (because it's the default in Operations). Others (G55 etc) are not-accepted.
     * Note the default of --tool-change == False. Use that for manual tool change, but you only get 1 tool per file. True means call C9. Note: C9 seems to not work when there is no auto-tool-changer (corrupts units and erases your settings file!)
     * This does arc gcodes (G02 and G03), so helical operations should work.
-    * This does Probe (G38.2), defaults to the same folder as the .sbpi, and .txt as the extension for output filename
+    * This does Probe (G38.2), defaults to the same folder as the .sbp, and .txt as the extension for output filename
     * Relative movement (G91) is not supported.
     * Like most post-processors, we accept single-digit gcodes like G1, and treat them as if they were canonical 2 digit, like G01.
     * opensbp commands can be in-lined via a comment:
@@ -375,7 +375,7 @@ class Refactored_Opensbp(PostProcessor):
                 'SHOW_MACHINE_UNITS' : True, # we have to set the machine
                 'AXIS_PRECISION' : 5, # we do calculations, so more precision to prevent rounding errors
                 'FEED_PRECISION' : 5,
-                'SPINDLE_WAIT' : 0, # we'll to the logic in the right place later
+                'SPINDLE_WAIT' : 0, # we'll do the logic in the right place later
             })
             try:
                 # We get back a processed (expanded) set of gcode
@@ -522,7 +522,7 @@ class ToOpenSBP:
             # be nice
             if time.monotonic() - self.last_gui_update >= PreventGuiTimeout:
                 if 'Gui' in dir(FreeCADGui):
-                    FreeCADGui.updateGui() # FIXME only if "in" gui
+                    FreeCADGui.updateGui()
                 self.last_gui_update = time.monotonic()
 
             self.post.values["line_number"] += 1 # actual line number
@@ -1340,8 +1340,8 @@ SkipProbeSubRoutines:"""
             self.current_location['js'] = [ float(s) for s in speeds['js'] ]
 
         print(f"### setspeeds hasjs {speeds['has_js']} {speeds['js']}")
-        if self.post.arguments.abort_on_unknown and speeds['has_js'] < 3:
-            raise ValueError(f"ToolController <{self.post._job.Label}>.<{tool_controller.Label}> did not set xy&z rapid speeds, use --no-abort-on-unknown to allow at {self.location(path_command)}")
+        if not self.post.arguments.native_rapid and speeds['has_js'] < 2:
+            raise ValueError(f"ToolController <{self.post._job.Label}>.<{tool_controller.Label}> did not set xy&z rapid speeds, use --no-native-rapid to allow at {self.location(path_command)}")
 
         return native
 
