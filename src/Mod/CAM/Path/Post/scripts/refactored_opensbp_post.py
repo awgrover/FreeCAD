@@ -922,6 +922,15 @@ SkipProbeSubRoutines:"""
 
         return native
 
+    def format_value(self, value, type='FEED_PRECISION'):
+        """format for the precision (e.g. AXIS_PRECISION)
+        notably dealing with slightly-less-than-zero == "0" not "-0"
+        """
+        # format rounds, so duplicate that effect
+        if abs(value) < 0.5 * 10**(- self.post.values[type]):
+            value = 0.0
+        return format(value, f".{self.post.values[type]}f")
+
     @gcode("G02","G03")
     def t_arc(self, path_command):
         # only center-format: IJ
@@ -982,12 +991,13 @@ SkipProbeSubRoutines:"""
         # The PostProcess code will drop the XYZ axis on --axis-modal, but we need it:
         x = path_command.Parameters.get('X', self.current_location['X'] )
         y = path_command.Parameters.get('Y', self.current_location['Y'] )
-        txt += format(x, f".{self.post.values['FEED_PRECISION']}f") + ","
-        txt += format(y, f".{self.post.values['FEED_PRECISION']}f") + ","
+
+        txt += self.format_value(x) + ","
+        txt += self.format_value(y) + ","
 
         # Center is at offset:
-        txt += format(path_command.Parameters["I"] if 'I' in path_command.Parameters.keys() else 0.0, f".{self.post.values['FEED_PRECISION']}f")  + ","
-        txt += format(path_command.Parameters["J"] if 'J' in path_command.Parameters.keys() else 0.0, f".{self.post.values['FEED_PRECISION']}f")  + ","
+        txt += self.format_value(path_command.Parameters["I"] if 'I' in path_command.Parameters.keys() else 0.0)  + ","
+        txt += self.format_value(path_command.Parameters["J"] if 'J' in path_command.Parameters.keys() else 0.0)  + ","
         txt += "T" + "," # move on diameter
         txt += dirstring + ","
 
@@ -996,7 +1006,7 @@ SkipProbeSubRoutines:"""
 
         # Z causes a helical, "causes the defined plunge to be made gradually as the cutter is circling down"
         # Note, dz is actual distance vector, but ShopBot uses -dz to mean "plunge" relative
-        txt += format(-dz, f".{self.post.values['FEED_PRECISION']}f") + ","
+        txt += self.format_value(-dz) + ","
 
         txt += "," # repetitions
         txt += "," # proportion-x
@@ -1019,7 +1029,7 @@ SkipProbeSubRoutines:"""
 
         # actual Z, opensbp plunge is a delta, note the actual Z as a comment
         z = path_command.Parameters.get('Z', self.current_location['Z'] )
-        txt += " ' Z" + format(z, f".{self.post.values['FEED_PRECISION']}f")
+        txt += " ' Z" + self.format_value(z)
         txt += "\n"
         return txt
 
