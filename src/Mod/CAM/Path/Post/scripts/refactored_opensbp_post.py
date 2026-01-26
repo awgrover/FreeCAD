@@ -22,6 +22,7 @@
 # *   USA                                                                   *
 # *                                                                         *
 # ***************************************************************************
+"""FreeCAD CAM post-processor for Shopbot native opensbb, in the "refactored" style"""
 
 import re
 import argparse
@@ -30,7 +31,7 @@ import operator
 import math
 import time
 
-from typing import Any, Optional, Union
+from typing import Any
 
 from Path.Post.Processor import PostProcessor
 import Path.Post.UtilsArguments as PostUtilsArguments
@@ -38,7 +39,8 @@ import Path.Post.UtilsExport as PostUtilsExport
 import Path.Post.UtilsParse as PostUtilsParse
 
 import Path
-import FreeCAD, FreeCADGui
+import FreeCAD
+import FreeCADGui
 
 translate = FreeCAD.Qt.translate
 
@@ -52,13 +54,13 @@ else:
 #
 # Define some types that are used throughout this file.
 #
-Defaults = dict[str, bool]
+Defaults = dict[str | bool]
 FormatHelp = str
-GCodeOrNone = Optional[str]
+GCodeOrNone = [str | None]
 GCodeSections = list[tuple[str, GCodeOrNone]]
 Parser = argparse.ArgumentParser
-ParserArgs = Union[None, str, argparse.Namespace]
-Postables = Union[list, list[tuple[str, list]]]
+ParserArgs = [None | str | argparse.Namespace]
+Postables = [list | list[tuple[str, list]]]
 Section = tuple[str, list]
 Sublist = list
 Units = str
@@ -173,7 +175,7 @@ class Refactored_Opensbp(PostProcessor):
             'last_command' : None,
             'first_probe' : True,
         })
-        # FIXME: should be done by PostProcessor, isn't there yet
+        # FIXME: should be done by PostProcessor, isn't there yet in 1.0.
         if 'G38.2' not in self.values['MOTION_COMMANDS']:
             self.values['MOTION_COMMANDS'].append( 'G38.2' )
         print(f"### .values['SPINDLE_WAIT'] {self.values['SPINDLE_WAIT']}")
@@ -538,6 +540,7 @@ class ToOpenSBP:
             else:
                 # canonicalize to 2 digits
                 # All the @gcode() methods can now assume 2 digits
+                # We have conflated Path.Command.Name and general gcode. this allows us to expand drill, then "post process" that.
                 path_command.Name = re.sub(r'^([A-Z])(\d(\.|$))', r'\g<1>0\2', path_command.Name)
 
             print(f"### GCODE [{self.post.values['line_number']}] {path_command.toGCode()}")
@@ -717,6 +720,8 @@ class ToOpenSBP:
         rez += self.comment(path_command.Name)
 
         # fixups
+        # We don't have access to the Path object, and we need/want to know where we are
+        # e.g. probing. This should be fixed in the new "machine" style
         if path_command.Name.startswith("(Post Processor: "):
             rez += self.comment( "  " + self.post._job.PostProcessorArgs )
         elif path_command.Name.startswith("(Cam File: "):
@@ -922,14 +927,14 @@ SkipProbeSubRoutines:"""
 
         return native
 
-    def format_value(self, value, type='FEED_PRECISION'):
+    def format_value(self, value, precision_type='FEED_PRECISION'):
         """format for the precision (e.g. AXIS_PRECISION)
         notably dealing with slightly-less-than-zero == "0" not "-0"
         """
         # format rounds, so duplicate that effect
-        if abs(value) < 0.5 * 10**(- self.post.values[type]):
+        if abs(value) < 0.5 * 10**(- self.post.values[precision_type]):
             value = 0.0
-        return format(value, f".{self.post.values[type]}f")
+        return format(value, f".{self.post.values[precision_type]}f")
 
     @gcode("G02","G03")
     def t_arc(self, path_command):
@@ -1063,11 +1068,11 @@ SkipProbeSubRoutines:"""
 
     @gcode('M08')
     def t_coolant_on(self, command):
-        return 'C99\n' # FIXME
+        return 'SO,3,1\n'
 
     @gcode('M09')
     def t_cooland_off(self, command):
-        return 'C99\n' # FIXME
+        return 'SO,3,0\n'
 
     @gcode('G38.2')
     def t_probe(self, command):
@@ -1076,7 +1081,7 @@ SkipProbeSubRoutines:"""
         if speed is not None:
             speed = float(speed)
         if speed == 0.0:
-            FreeCAD.Console.PrintWarning(f"G38.2 with an F0.0, set Tool speeds? at {self.location(path_command)}\n")
+            FreeCAD.Console.PrintWarning(f"G38.2 with an F0.0, set Tool speeds? at {self.location(command)}\n")
             return ''
         if speed is None:
             print(f"### ms {self.current_location['ms']}")

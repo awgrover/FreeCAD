@@ -149,7 +149,7 @@ class TestRefactoredOpenSBPPost(PathTestUtils.PathTestBase):
                 self.profile_op.Path = Path.Path([ Path.Command(x) for x in args[:-2]])
             except ValueError as e:
                 try:
-                    i=None # hack: we want the i from the 'for'
+                    i=None # hack: we use the i from the 'for' in the `except`
                     for i,x in enumerate(args[:-2]):
                         Path.Command(x)
                 except ValueError:
@@ -337,8 +337,7 @@ AfterWrongUnits:
         )
 
     def test015(self):
-        """
-        Test precision, and units, with G1, which generates MS commands
+        """Test precision, and units, with G1, which generates MS commands
         """
         f = FeedSpeed / 60.0 # mm/s
 
@@ -472,14 +471,13 @@ M3,-2.000,-3.000,-4.000
         )
 
     def test030(self):
-        """
-        Test Pre-amble
+        """Test Pre-amble
         """
 
         # preamble values are verbatim, not unit converted!
         self.compare_multi(
             "(none)",
-            f"--no-header --no-comments --preamble='G0 Z50\nG1 F700 X20' --no-show-editor --metric",
+            "--no-header --no-comments --preamble='G0 Z50\nG1 F700 X20' --no-show-editor --metric",
             self.wrap("", preamble="""J3,,,50.000
 MS,700.000
 MX,20.000
@@ -487,8 +485,7 @@ MX,20.000
         )
 
     def test040(self):
-        """
-        Test Post-amble
+        """Test Post-amble
         """
         # postamble is literal gcode, no unit translation
         self.compare_multi(
@@ -501,8 +498,7 @@ MX,22.000
         )
 
     def test050(self):
-        """
-        Test inches
+        """Test inches
         """
 
         # inches
@@ -521,8 +517,7 @@ MX,22.000
         )
 
     def test060(self):
-        """
-        Test test modal
+        """Test test modal
         Suppress the command name if the same as previous
         """
         f = f"{FeedSpeed / 60.0:0.3f}" # mm/s
@@ -544,8 +539,7 @@ M3,10.000,20.000,30.000
         )
 
     def test070(self):
-        """
-        Suppress the axis coordinate if the same as previous
+        """Suppress the axis coordinate if the same as previous
         """
 
         # w/o axis-modal
@@ -577,8 +571,7 @@ J3,,,31.000
         )
 
     def test080(self):
-        """
-        Test tool change, and spindle
+        """Test tool change, and spindle
         """
 
         self.__class__.job = self.doc.getObject("Job001")
@@ -663,8 +656,7 @@ AfterWrongUnits:
 
 
     def test090(self):
-        """
-        Test comment
+        """Test comment
         """
 
         self.compare_multi( "(comment)",
@@ -678,7 +670,8 @@ AfterWrongUnits:
         )
 
     def test100(self):
-        """Test A, B axis output for values between 0 and 90 degrees"""
+        """Test A, B axis output for values between 0 and 90 degrees
+        """
         self.compare_multi(
             f"G1 F{FeedSpeed} X10 Y20 Z30 A40 B50",
             "--no-header --no-comments --no-show-editor",
@@ -697,7 +690,8 @@ M5,0.3937,0.7874,1.1811,40.0000,50.0000
 
     @unittest.expectedFailure
     def test105(self):
-        """Test A, B axis output for distance, not degrees"""
+        """Test A, B axis output for distance, not degrees
+        """
 
         # only noticeable for --inches
 
@@ -1153,7 +1147,7 @@ G0 Z56.000000""".split("\n"),
             self.wrap("""'(Probe009)
 '(Begin Probing)
 '(PROBEOPEN probe)
-'Load the My_Variables file from Custom Cut 90 in C:\SbParts\Custom
+'Load the My_Variables file from Custom Cut 90 in C:\\SbParts\\Custom
 C#,90
 OPEN "probe.txt" FOR OUTPUT as #1
 &hit = 0
@@ -1189,8 +1183,7 @@ FailedToTouch:
   MSGBOX(Failed to touch...Exiting,16,Probe Failed)
   END
 SkipProbeSubRoutines:
-""", 
+""",
             comments=True, precision=3),
             debug=True
         )
-
