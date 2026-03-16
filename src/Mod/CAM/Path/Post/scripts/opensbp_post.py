@@ -1,27 +1,22 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2025 sliptonic <shopinthewoods@gmail.com>
 
-# ***************************************************************************
-# *   Copyright (c) 2025 sliptonic <shopinthewoods@gmail.com>               *
-# *                                                                         *
-# *   This file is part of the FreeCAD CAx development system.              *
-# *                                                                         *
-# *   This program is free software; you can redistribute it and/or modify  *
-# *   it under the terms of the GNU Lesser General Public License (LGPL)    *
-# *   as published by the Free Software Foundation; either version 2 of     *
-# *   the License, or (at your option) any later version.                   *
-# *   for detail see the LICENCE text file.                                 *
-# *                                                                         *
-# *   FreeCAD is distributed in the hope that it will be useful,            *
-# *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
-# *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
-# *   GNU Lesser General Public License for more details.                   *
-# *                                                                         *
-# *   You should have received a copy of the GNU Library General Public     *
-# *   License along with FreeCAD; if not, write to the Free Software        *
-# *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  *
-# *   USA                                                                   *
-# *                                                                         *
-# ***************************************************************************
+################################################################################
+#                                                                              #
+#   FreeCAD is free software: you can redistribute it and/or modify            #
+#   it under the terms of the GNU Lesser General Public License as             #
+#   published by the Free Software Foundation, either version 2.1              #
+#   of the License, or (at your option) any later version.                     #
+#                                                                              #
+#   FreeCAD is distributed in the hope that it will be useful,                 #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty                #
+#   of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                    #
+#   See the GNU Lesser General Public License for more details.                #
+#                                                                              #
+#   You should have received a copy of the GNU Lesser General Public           #
+#   License along with FreeCAD. If not, see https://www.gnu.org/licenses       #
+#                                                                              #
+################################################################################
 
 """
 OpenSBP Post Processor for ShopBot Controllers
@@ -222,9 +217,11 @@ class OpenSBPPost(PostProcessor):
             return val
 
         # Handle speed settings (MS/JS commands)
+        # F in Path.Command is in FreeCAD base units: mm/sec.
+        # ShopBot MS/JS expect inches/sec or mm/sec, so no time-unit conversion is needed.
+        # Only apply the spatial unit conversion (mm → in) for imperial output.
         if "F" in params:
-            speed = params["F"] * 60.0  # Convert mm/sec to mm/min
-            speed = get_value(speed)
+            speed = get_value(params["F"])
 
             prefix = "JS" if is_rapid else "MS"
 
@@ -337,22 +334,21 @@ class OpenSBPPost(PostProcessor):
             plunge = get_value(current_z - target_z)  # Relative, inverted sign
 
             # Set move speed if feed rate is specified
+            # F is in mm/sec (FreeCAD base units); ShopBot also expects per-second.
             if "F" in params:
-                speed = params["F"] * 60.0  # Convert mm/sec to mm/min
-                speed = get_value(speed)
+                speed = get_value(params["F"])
                 # Only output if speed changed
                 if self._current_move_speed_xy != speed or self._current_move_speed_z != speed:
                     output.append(f">MS,{speed:.4f},{speed:.4f}")
                     self._current_move_speed_xy = speed
                     self._current_move_speed_z = speed
 
-            # Use L (linear) instead of T (tool comp) for helical arcs
             output.append(
-                f">CG,,{x_val:.4f},{y_val:.4f},{i_val:.4f},{j_val:.4f},L,{direction},{plunge:.4f}"
+                f">CG,,{x_val:.4f},{y_val:.4f},{i_val:.4f},{j_val:.4f},T,{direction},{plunge:.4f}"
             )
         else:
-            # Simple arc in XY plane (no tool compensation - use L instead of T)
-            output.append(f">CG,,{x_val:.4f},{y_val:.4f},{i_val:.4f},{j_val:.4f},L,{direction}")
+            # Simple arc in XY plane, cutter on true path (T = no cutter compensation)
+            output.append(f">CG,,{x_val:.4f},{y_val:.4f},{i_val:.4f},{j_val:.4f},T,{direction}")
 
         return "\n".join(output) if output else None
 
