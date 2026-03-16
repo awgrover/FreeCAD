@@ -2208,8 +2208,14 @@ class PostProcessor:
 
         def format_feed_param(value):
             """Format feed parameter with speed precision and unit conversion."""
-            # Convert from mm/sec to mm/min (multiply by 60)
-            feed_value = value * 60.0
+
+            # There are actually oddball controls that use mm/second feedrate.
+            if self._machine and hasattr(self._machine, "feedrate_per_second"):
+                # Check if feedrate is in seconds or minutes
+                feed_value = value
+            else:
+                # Convert from mm/sec to mm/min (multiply by 60)
+                feed_value = value * 60.0
 
             # Apply unit conversion if imperial
             is_imperial = False
