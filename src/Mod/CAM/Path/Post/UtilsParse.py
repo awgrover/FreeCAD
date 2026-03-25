@@ -97,10 +97,6 @@ def check_for_drill_translate(
             )
         except (ArithmeticError, LookupError) as err:
             print("exception occurred", err)
-        # drill_translate uses G90 mode internally, so need to
-        # switch back to G91 mode if it was that way originally
-        if values["MOTION_MODE"] == "G91":
-            gcode.append(f"{linenumber(values)}G91")
         return True
     return False
 
@@ -411,7 +407,7 @@ def drill_translate(
     motion_location: PathParameters,
     drill_retract_mode: str,
 ) -> None:
-    """Translate drill cycles.
+    """Translate drill cycles for a str g-code and dict of params.
 
     Currently only cycles in XY are provided (G17).
     XZ (G18) and YZ (G19) are not dealt with.
@@ -421,9 +417,11 @@ def drill_translate(
     """
     from Path.Post.DrillCycleExpander import DrillCycleExpander
 
+    restore_state = []
     if values["MOTION_MODE"] == "G91":
-        # force absolute coordinates during cycles
+        # force absolute coordinates during cycles, fixup of xyz below
         gcode.append(f"{linenumber(values)}G90")
+        restore_state.append("G91") # and revert when done
 
     # TODO: Defaulting to 0.0 when an axis is missing from motion_location
     # silently degrades G98 safe-height retract (max(initial_z, R) uses 0
@@ -443,6 +441,7 @@ def drill_translate(
     if drill_params.get("R", 0.0) < drill_params.get("Z", 0.0):
         comment = create_comment(values, "Drill cycle error: R less than Z")
         gcode.append(f"{linenumber(values)}{comment}")
+        gcode.extend( restore_state )
         return
 
     # Create expander and expand the drill cycle
@@ -475,6 +474,9 @@ def _format_expanded_command(values: Values, gcode: Gcode, cmd) -> None:
         parts.append(f"P{params['P']}")
 
     gcode.append(f"{linenumber(values)}{format_command_line(values, parts)}")
+
+    # for G91
+    gcode.extend( restore_state )
 
 
 def format_command_line(values: Values, command_line: CommandLine) -> str:
@@ -639,7 +641,8 @@ def output_G81_G82_drill_moves(
     gcode.append(f"{linenumber(values)}{cmd}{F_feedrate}")
     # pause where applicable
     if command == "G82":
-        cmd = format_command_line(values, ["G4", f'P{str(params["P"])}'])
+        # no specific TIME_PRECISION
+        cmd = format_command_line(values, ["G4", f'P{params["P"]:.{values["AXIS_PRECISION"]}f}'])
         gcode.append(f"{linenumber(values)}{cmd}")
     gcode.append(f"{linenumber(values)}{G0_retract_z}")
 
