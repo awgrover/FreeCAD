@@ -42,6 +42,7 @@ import Path.Base.Util as PathUtil
 import Path.Post.UtilsArguments as PostUtilsArguments
 import Path.Post.UtilsExport as PostUtilsExport
 import Path.Post.PostList as PostList
+from Path.Post.UtilsParse import drill_translate, format_command_line
 
 import FreeCAD
 import Path
@@ -364,7 +365,7 @@ class PostProcessor:
                 "name": "drill_cycles_to_translate",
                 "type": "text",
                 "label": translate("CAM", "Drill Cycles to Translate"),
-                "default": "\n".join(Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL),
+                "default": "",
                 "help": translate(
                     "CAM",
                     "List of drill cycle commands to translate to G0/G1 moves (one per line). "
@@ -859,8 +860,7 @@ class PostProcessor:
         if self.values.get("OUTPUT_HEADER", True):
             for section_name, sublist in postables:
                 for item in sublist:
-                    if hasattr(item, "ToolNumber"):  # Tool controller
-                        # Check if tools should be listed in header
+                    if item.item_type == "tool_controller":
                         list_tools = True
                         if (
                             self._machine
@@ -897,29 +897,91 @@ class PostProcessor:
 
         Subclasses can override to customize canned cycle handling.
         """
+
+
+        to_translate = self._machine.postprocessor_properties.get("drill_cycles_to_translate", None)
+        if True:
+            print(  # DEBUG
+                f"---_machine\n{json.dumps(self._machine.to_dict(), sort_keys=True, indent=2)}\n---"
+                if self._machine is not None
+                else f"<NO _machine in {self.__class__.__name__}>"
+            )
+
+        def add_cannedCycleTerminator(item):
+            drill_commands = [
+                # FIXME: use Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL?
+                "G73",
+                "G74",
+                "G81",
+                "G82",
+                "G83",
+                "G84",
+                "G85",
+                "G86",  # FIXME: not in Constants
+                "G87",  # FIXME: not in Constants
+                "G88",
+                "G89",
+            ]
+
+            has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
+
+            if has_drill_cycles:
+                item.path = PostUtils.cannedCycleTerminator(item.path)
+
+        def replace_drill_cycles(item):
+            print(f"#== replace ?: {item.path.Commands}")
+            translated = []
+
+            mock_values = {
+                "MOTION_MODE": "G90",
+                "COMMAND_SPACE": " ",
+                "UNIT_FORMAT": "mm",
+                "UNIT_SPEED_FORMAT": "mm/s",
+                "AXIS_PRECISION": 3,
+                "FEED_PRECISION": 3,
+                "OUTPUT_LINE_NUMBERS": False,
+            }
+            mock_modal_state = {  # self._modal_state, # FIXME: not being tracked
+                "Z": 0,
+                "X": 0,
+                "Y": 0,
+                "Z": 0,
+                "F": 1000,
+            }
+
+            def gtop(gcode_str):
+                p = Path.Command()
+                p.setFromGCode(gcode_str)
+                return p
+
+            for command in item.path.Commands:
+                if command.Name in to_translate:
+                    gcode_str_list = []
+                    drill_translate(
+                        mock_values,
+                        gcode_str_list,
+                        command.Name,
+                        command.Parameters,
+                        mock_modal_state,
+                        "G98",  # drill_retract_mode FIXME
+                    )
+                    print(f"#== replace raw  : {gcode_str_list}")
+                    translated.extend([gtop(g) for g in gcode_str_list])
+                    print(f"#== replace expand  : {translated}")
+                else:
+                    translated.append(command)
+
+            item.path = Path.Path(translated)
+            print(f"#== replace rez  : {item.path.Commands}")
+
         for section_name, sublist in postables:
             for item in sublist:
                 has_drill_cycles = False
-                if hasattr(item, "Path") and item.Path:
-                    drill_commands = [
-                        # FIXME: use Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL
-                        "G73",
-                        "G74",
-                        "G81",
-                        "G82",
-                        "G83",
-                        "G84",
-                        "G85",
-                        "G86",  # FIXME: not in Constants
-                        "G87",  # FIXME: not in Constants
-                        "G88",
-                        "G89",
-                    ]
-
-                    has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
-
-                if has_drill_cycles:
-                    item.path = PostUtils.cannedCycleTerminator(item.Path)
+                if item.path:
+                    if to_translate:
+                        replace_drill_cycles(item)
+                    else:
+                        add_cannedCycleTerminator(item)
 
     def _expand_split_arcs(self, postables):
         """Split arc commands into linear segments if configured.
@@ -1364,6 +1426,14 @@ class PostProcessor:
         self._expand_xy_before_z(postables)
         self._expand_bcnc_commands(postables)
         self._expand_tool_length_offset(postables)
+
+        """
+        for p in postables:
+            if..
+                newlist = (canned(cmd) for cmd in item.path.Commands)
+                newlist = (splitarcs(cmd) for cmd in newlist)
+                item.path = Path.Path(newlist)
+        """
 
         Path.Log.debug(postables)
 
@@ -2064,8 +2134,7 @@ class PostProcessor:
         WHERE = False
 
         # Validate command is supported
-        # FIXME: shouldn't this be supported_commands?
-        # was: supported = Constants.GCODE_SUPPORTED + Constants.GCODE_FIXTURES + Constants.MCODE_SUPPORTED
+
         if False:
             print(  # DEBUG
                 f"---_machine\n{json.dumps(self._machine.to_dict(), sort_keys=True, indent=2)}\n---"
@@ -2088,7 +2157,6 @@ class PostProcessor:
                 + Constants.GCODE_NON_CONFORMING
             )
 
-        print(f"## supported {sorted(supported)}")
         if (
             command.Name not in supported
             and not command.Name.startswith("(")
@@ -2345,7 +2413,6 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize rapid move handling.
         """
-        from Path.Post.UtilsParse import format_command_line
 
         # Extract command components
         command_name = command.Name
