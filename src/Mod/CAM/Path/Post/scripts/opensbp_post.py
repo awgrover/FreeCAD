@@ -144,6 +144,10 @@ class OpenSBPPost(PostProcessor):
                 prop["default"] = "C7\n'End of program"
             elif prop["name"] == "supported_commands":
                 prop["default"] = "\n".join(cls.GCodeSupported)
+            elif prop["name"] == "drill_cycles_to_translate":
+                prop["default"] = "\n".join(
+                    Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
+                )
 
         return common_props
 
