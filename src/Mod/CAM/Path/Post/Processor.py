@@ -55,7 +55,7 @@ translate = FreeCAD.Qt.translate
 
 Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
 
-debug = False
+debug = True
 if debug:
     Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
     Path.Log.trackModule(Path.Log.thisModule())
@@ -364,7 +364,7 @@ class PostProcessor:
                 "name": "drill_cycles_to_translate",
                 "type": "text",
                 "label": translate("CAM", "Drill Cycles to Translate"),
-                "default": "\n".join(Constants.GCODE_MOVE_DRILL),
+                "default": "\n".join(Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL),
                 "help": translate(
                     "CAM",
                     "List of drill cycle commands to translate to G0/G1 moves (one per line). "
@@ -597,17 +597,15 @@ class PostProcessor:
 
         return "nc"
 
-    def _buildPostList(self, early_tool_prep=False):
+    def _buildPostList(self):
         """Determine the specific objects and order to postprocess.
 
-        Args:
-            early_tool_prep: If True, split tool changes into separate prep (Tn)
-                           and change (M6) commands for better machine efficiency
+        Reads early_tool_prep from self._machine.processing if available.
 
         Returns:
-            List of (name, operations) tuples
+            List of (name, operations) tuples where every item is a PostList.Postable.
         """
-        return PostList.buildPostList(self, early_tool_prep)
+        return PostList.buildPostList(self)
 
     def _merge_machine_config(self):
         """Merge machine configuration into the values dict.
@@ -859,8 +857,7 @@ class PostProcessor:
         if self.values.get("OUTPUT_HEADER", True):
             for section_name, sublist in postables:
                 for item in sublist:
-                    if hasattr(item, "ToolNumber"):  # Tool controller
-                        # Check if tools should be listed in header
+                    if item.item_type == "tool_controller":
                         list_tools = True
                         if (
                             self._machine
@@ -870,9 +867,8 @@ class PostProcessor:
                             list_tools = self._machine.output.list_tools_in_header
 
                         if list_tools:
-                            gcodeheader.add_tool(item.ToolNumber, item.Label)
-                    elif hasattr(item, "Label") and item.Label == "Fixture":  # Fixture
-                        # Check if fixtures should be listed in header
+                            gcodeheader.add_tool(item.data["tool_number"], item.label)
+                    elif item.item_type == "fixture":
                         list_fixtures = True
                         if (
                             self._machine
@@ -882,8 +878,8 @@ class PostProcessor:
                             list_fixtures = self._machine.output.list_fixtures_in_header
 
                         if list_fixtures:
-                            if hasattr(item, "Path") and item.Path and item.Path.Commands:
-                                fixture_name = item.Path.Commands[0].Name
+                            if item.path and item.path.Commands:
+                                fixture_name = item.path.Commands[0].Name
                                 gcodeheader.add_fixture(fixture_name)
 
         return gcodeheader
@@ -900,8 +896,9 @@ class PostProcessor:
         for section_name, sublist in postables:
             for item in sublist:
                 has_drill_cycles = False
-                if hasattr(item, "Path") and item.Path:
+                if item.path:
                     drill_commands = [
+                        # FIXME: use Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL
                         "G73",
                         "G74",
                         "G81",
@@ -909,15 +906,16 @@ class PostProcessor:
                         "G83",
                         "G84",
                         "G85",
-                        "G86",
-                        "G87",
+                        "G86",  # FIXME: not in Constants
+                        "G87",  # FIXME: not in Constants
                         "G88",
                         "G89",
                     ]
+
                     has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
 
                 if has_drill_cycles:
-                    item.Path = PostUtils.cannedCycleTerminator(item.Path)
+                    item.path = PostUtils.cannedCycleTerminator(item.path)
 
     def _expand_split_arcs(self, postables):
         """Split arc commands into linear segments if configured.
@@ -936,8 +934,8 @@ class PostProcessor:
 
         for section_name, sublist in postables:
             for item in sublist:
-                if hasattr(item, "Path") and item.Path:
-                    item.Path = PostUtils.splitArcs(item.Path)
+                if item.path:
+                    item.path = PostUtils.splitArcs(item.path)
 
     def _expand_spindle_wait(self, postables):
         """Inject G4 dwell after spindle start commands (M3/M4).
@@ -957,17 +955,14 @@ class PostProcessor:
         wait_time = spindle.spindle_wait
         for section_name, sublist in postables:
             for item in sublist:
-                if hasattr(item, "Path") and item.Path:
+                if item.path:
                     new_commands = []
-                    for cmd in item.Path.Commands:
+                    for cmd in item.path.Commands:
                         new_commands.append(cmd)
-                        # After spindle start commands, inject G4 pause
                         if cmd.Name in Constants.MCODE_SPINDLE_ON:
-                            # Create G4 dwell command with P parameter
                             pause_cmd = Path.Command("G4", {"P": wait_time})
                             new_commands.append(pause_cmd)
-                    # Replace Path with modified command list
-                    item.Path = Path.Path(new_commands)
+                    item.path = Path.Path(new_commands)
 
     def _expand_coolant_delay(self, postables):
         """Inject G4 dwell after coolant on commands.
@@ -986,17 +981,14 @@ class PostProcessor:
 
         for section_name, sublist in postables:
             for item in sublist:
-                if hasattr(item, "Path") and item.Path:
+                if item.path:
                     new_commands = []
-                    for cmd in item.Path.Commands:
+                    for cmd in item.path.Commands:
                         new_commands.append(cmd)
-                        # After coolant on commands, inject G4 pause
                         if cmd.Name in Constants.MCODE_COOLANT_ON:
-                            # Create G4 dwell command with P parameter
                             pause_cmd = Path.Command("G4", {"P": spindle.coolant_delay})
                             new_commands.append(pause_cmd)
-                    # Replace Path with modified command list
-                    item.Path = Path.Path(new_commands)
+                    item.path = Path.Path(new_commands)
 
     def _expand_translate_rapids(self, postables):
         """Replace G0 rapid moves with G1 linear moves.
@@ -1015,14 +1007,14 @@ class PostProcessor:
 
         for section_name, sublist in postables:
             for item in sublist:
-                if hasattr(item, "Path") and item.Path:
+                if item.path:
                     new_commands = []
-                    Path.Log.debug(f"Translating rapid moves for {item.Label}")
-                    for cmd in item.Path.Commands:
+                    Path.Log.debug(f"Translating rapid moves for {item.label}")
+                    for cmd in item.path.Commands:
                         if cmd.Name in Constants.GCODE_MOVE_RAPID:
                             cmd.Name = "G1"
                         new_commands.append(cmd)
-                    item.Path = Path.Path(new_commands)
+                    item.path = Path.Path(new_commands)
 
     def _expand_xy_before_z(self, postables):
         """Decompose first move after tool change into XY then Z.
@@ -1047,18 +1039,16 @@ class PostProcessor:
             tool_change_seen = False
 
             for item in sublist:
-                # Check if this is a tool change item
-                if hasattr(item, "ToolNumber"):
+                if item.item_type == "tool_controller":
                     tool_change_seen = True
-                    Path.Log.debug(f"Tool change detected: T{item.ToolNumber}")
+                    Path.Log.debug(f"Tool change detected: T{item.data['tool_number']}")
                     continue
 
-                # Process operations - check for moves after tool change
-                if hasattr(item, "Path") and item.Path:
+                if item.path:
                     new_commands = []
                     first_move_processed = False
 
-                    for cmd in item.Path.Commands:
+                    for cmd in item.path.Commands:
                         # Check if this is a tool change command (M6)
                         if cmd.Name in Constants.MCODE_TOOL_CHANGE:
                             new_commands.append(cmd)
@@ -1116,10 +1106,9 @@ class PostProcessor:
                             # Not the first move or not a move command
                             new_commands.append(cmd)
 
-                    # Update the item's path if we made changes
-                    if len(new_commands) != len(item.Path.Commands):
-                        item.Path = Path.Path(new_commands)
-                        Path.Log.debug(f"Updated path for {item.Label}")
+                    if len(new_commands) != len(item.path.Commands):
+                        item.path = Path.Path(new_commands)
+                        Path.Log.debug(f"Updated path for {item.label}")
 
     def _expand_bcnc_commands(self, postables):
         """Inject or remove bCNC block annotation commands.
@@ -1158,37 +1147,28 @@ class PostProcessor:
 
             for section_name, sublist in postables:
                 for item in sublist:
-                    if hasattr(item, "Proxy"):  # OPERATION
-                        # Create bCNC block start command
-                        bcnc_start_cmd = Path.Command("(Block-name: " + item.Label + ")")
+                    if item.item_type == "operation":
+                        bcnc_start_cmd = Path.Command("(Block-name: " + item.label + ")")
                         bcnc_start_cmd.Annotations = {"bcnc": "block_start"}
 
-                        # Create bCNC block metadata commands
                         bcnc_expand_cmd = Path.Command("(Block-expand: 0)")
                         bcnc_expand_cmd.Annotations = {"bcnc": "block_meta"}
 
                         bcnc_enable_cmd = Path.Command("(Block-enable: 1)")
                         bcnc_enable_cmd.Annotations = {"bcnc": "block_meta"}
 
-                        # Insert bCNC commands at the beginning of the operation's Path
-                        if hasattr(item, "Path") and item.Path:
-                            # Create a copy of the original commands to avoid modifying the original Path
-                            original_commands = list(item.Path.Commands)
-
-                            # Create new Path with bCNC commands
+                        if item.path:
+                            original_commands = list(item.path.Commands)
                             new_commands = [bcnc_start_cmd, bcnc_expand_cmd, bcnc_enable_cmd]
                             new_commands.extend(original_commands)
-                            # Create a new Path object
-                            item.Path = Path.Path(new_commands)
+                            item.path = Path.Path(new_commands)
         else:
-            # OUTPUT_BCNC is False - remove any existing bCNC commands from operations
             Path.Log.debug("Removing existing bCNC commands")
             for section_name, sublist in postables:
                 for item in sublist:
-                    if hasattr(item, "Proxy") and hasattr(item, "Path") and item.Path:
-                        # Filter out any existing bCNC commands
+                    if item.item_type == "operation" and item.path:
                         filtered_commands = []
-                        for cmd in item.Path.Commands:
+                        for cmd in item.path.Commands:
                             if not (
                                 cmd.Name.startswith("(Block-name:")
                                 or cmd.Name.startswith("(Block-expand:")
@@ -1196,97 +1176,49 @@ class PostProcessor:
                             ):
                                 filtered_commands.append(cmd)
 
-                        # Create new Path without bCNC commands
-                        if len(filtered_commands) != len(item.Path.Commands):
-                            item.Path = Path.Path(filtered_commands)
+                        if len(filtered_commands) != len(item.path.Commands):
+                            item.path = Path.Path(filtered_commands)
 
     def _expand_tool_length_offset(self, postables):
         """Inject or remove G43 tool length offset commands.
 
         When OUTPUT_TOOL_LENGTH_OFFSET is True, adds G43 commands after M6
-        tool change commands in operations, and tracks which tool change
-        items need G43 commands vs which should have M6 suppressed.
+        tool change commands in operations and tool change items.
 
         When OUTPUT_TOOL_LENGTH_OFFSET is False, removes any existing G43
         commands from operation paths.
 
-        Subclasses can override to customize tool length offset handling.
+        Simplified single-pass implementation.
         """
         output_tool_length_offset = self.values.get("OUTPUT_TOOL_LENGTH_OFFSET", True)
         Path.Log.debug(f"OUTPUT_TOOL_LENGTH_OFFSET value: {output_tool_length_offset}")
 
-        # Dictionary to store G43 commands for tool change items
+        # Clear tracking dictionaries
         self._tool_change_g43_commands = {}
-        # Track which tool changes should be suppressed (because operation has M6)
         self._suppress_tool_change_m6 = set()
 
-        if output_tool_length_offset:
-            Path.Log.debug("Creating G43 tool length offset commands")
-            for section_name, sublist in postables:
-                # First pass: check if operations have M6 commands and add G43 to them
-                for item in sublist:
-                    if hasattr(item, "Proxy"):  # OPERATION
-                        if hasattr(item, "Path") and item.Path:
-                            commands_with_g43 = []
-                            for cmd in item.Path.Commands:
-                                commands_with_g43.append(cmd)
-                                # If this is an M6 command, add G43 after it
-                                if cmd.Name in ("M6", "M06") and "T" in cmd.Parameters:
-                                    tool_num = cmd.Parameters["T"]
-                                    g43_cmd = Path.Command("G43", {"H": tool_num})
-                                    g43_cmd.Annotations = {"tool_length_offset": True}
-                                    commands_with_g43.append(g43_cmd)
-                                    Path.Log.debug(
-                                        f"Added G43 H{tool_num} after M6 in operation {item.Label}"
-                                    )
+        if not output_tool_length_offset:
+            return
 
-                            # Update the operation's Path with G43 commands inserted
-                            if len(commands_with_g43) != len(item.Path.Commands):
-                                item.Path = Path.Path(commands_with_g43)
-
-                # Second pass: handle tool change items and mark suppression
-                operations_with_m6 = set()
-                for item in sublist:
-                    if hasattr(item, "Proxy"):  # OPERATION
-                        if hasattr(item, "Path") and item.Path:
-                            for cmd in item.Path.Commands:
-                                if cmd.Name in ("M6", "M06") and "T" in cmd.Parameters:
-                                    tool_num = cmd.Parameters["T"]
-                                    operations_with_m6.add(tool_num)
-
-                for item in sublist:
-                    if hasattr(item, "ToolNumber"):  # TOOLCHANGE
-                        tool_num = item.ToolNumber
-                        if tool_num in operations_with_m6:
-                            # Suppress M6 generation for this tool change since operation has it
-                            self._suppress_tool_change_m6.add(id(item))
-                            Path.Log.debug(f"Suppressing M6 generation for tool change T{tool_num}")
-                        else:
-                            # Add G43 command to tool change item
+        Path.Log.debug("Creating G43 tool length offset commands")
+        for section_name, sublist in postables:
+            for item in sublist:
+                Path.Log.debug(f"Processing item: {item.item_type}")
+                if item.item_type == "tool_controller" and item.path:
+                    commands_with_g43 = []
+                    for cmd in item.path.Commands:
+                        commands_with_g43.append(cmd)
+                        if cmd.Name in ("M6", "M06") and "T" in cmd.Parameters:
+                            tool_num = cmd.Parameters["T"]
                             g43_cmd = Path.Command("G43", {"H": tool_num})
                             g43_cmd.Annotations = {"tool_length_offset": True}
-                            self._tool_change_g43_commands[id(item)] = [g43_cmd]
-        else:
-            # OUTPUT_TOOL_LENGTH_OFFSET is False - remove G43 commands from operation Paths
-            Path.Log.debug("G43 tool length offset commands disabled")
-            self._tool_change_g43_commands = {}
-            self._suppress_tool_change_m6 = set()
+                            commands_with_g43.append(g43_cmd)
+                            Path.Log.debug(
+                                f"Added G43 H{tool_num} after M6 in operation {item.label}"
+                            )
 
-            # Remove any existing G43 commands from operation Paths
-            for section_name, sublist in postables:
-                for item in sublist:
-                    if hasattr(item, "Proxy") and hasattr(item, "Path") and item.Path:
-                        # Filter out any existing G43 commands
-                        filtered_commands = []
-                        for cmd in item.Path.Commands:
-                            if not (
-                                cmd.Name == "G43" and cmd.Annotations.get("tool_length_offset")
-                            ):
-                                filtered_commands.append(cmd)
-
-                        # Create new Path without G43 commands
-                        if len(filtered_commands) != len(item.Path.Commands):
-                            item.Path = Path.Path(filtered_commands)
+                    if len(commands_with_g43) != len(item.path.Commands):
+                        item.path = Path.Path(commands_with_g43)
 
     def export2(self) -> Union[None, GCodeSections]:
         """
@@ -1310,6 +1242,7 @@ class PostProcessor:
             insert_line_numbers,
         )
 
+        print(f"### EXPORT2")
         Path.Log.debug("Starting export2()")
 
         # ===== STAGE 0: PRE-PROCESSING DIALOG =====
@@ -1332,13 +1265,16 @@ class PostProcessor:
         # Process all jobs (currently only first job supported)
         all_job_sections = []
 
-        # Get early_tool_prep setting from machine config
-        early_tool_prep = False
-        if self._machine and hasattr(self._machine, "processing"):
-            early_tool_prep = getattr(self._machine.processing, "early_tool_prep", False)
+        def bad():  # DEBUG
+            for section_name, sublist in postables:
+                for item in sublist:
+                    if hasattr(item, "Path"):
+                        for cmd in item.Path.Commands:
+                            if cmd.Name == "G98":
+                                raise Exception(f"Bob {cmd}")
 
         # Build ordered postables for this job
-        postables = self._buildPostList(early_tool_prep)
+        postables = self._buildPostList()
 
         # Allow derived postprocessors to transform postables before expansion
         self._expand_postprocessor_commands(postables)
@@ -1421,7 +1357,20 @@ class PostProcessor:
 
             for item in sublist:
                 # Determine item type and add appropriate pre-blocks
-                if hasattr(item, "ToolNumber"):  # TOOLCHANGE
+                if item.item_type == "tool_controller":  # TOOLCHANGE
+
+                    if self._machine and hasattr(self._machine, "processing"):
+                        if not self._machine.processing.tool_change:
+                            comment_symbol = self.values.get("COMMENT_SYMBOL", "(")
+                            tool_num = item.data["tool_number"]
+                            if comment_symbol == "(":
+                                gcode_lines.append(f"(Tool change suppressed: M6 T{tool_num})")
+                            else:
+                                gcode_lines.append(
+                                    f"{comment_symbol} Tool change suppressed: M6 T{tool_num}"
+                                )
+                            continue
+
                     if self._machine and self._machine.postprocessor_properties.get(
                         "pre_tool_change"
                     ):
@@ -1434,51 +1383,7 @@ class PostProcessor:
                         ]
                         gcode_lines.extend(pre_lines)
 
-                    # Generate M6 tool change command
-                    if self._machine and hasattr(self._machine, "processing"):
-                        if self._machine.processing.tool_change:
-                            # Check if M6 generation should be suppressed (operation already has M6)
-                            if id(item) not in self._suppress_tool_change_m6:
-                                # Generate M6 T{ToolNumber} command
-                                tool_num = item.ToolNumber
-                                m6_cmd = f"M6 T{tool_num}"
-                                gcode_lines.append(m6_cmd)
-
-                                # Output G43 commands if they were added in Stage 2.6
-                                g43_commands = self._tool_change_g43_commands.get(id(item), [])
-                                for g43_cmd in g43_commands:
-                                    gcode_g43 = self.convert_command_to_gcode(g43_cmd)
-                                    if gcode_g43 is not None and gcode_g43.strip():
-                                        gcode_lines.append(gcode_g43)
-                            else:
-                                # M6 suppressed - operation already handles it
-                                Path.Log.debug(
-                                    f"M6 T{item.ToolNumber} suppressed - handled by operation"
-                                )
-                        else:
-                            # Tool change disabled - output as comment
-                            comment_symbol = self.values.get("COMMENT_SYMBOL", "(")
-                            tool_num = item.ToolNumber
-                            if comment_symbol == "(":
-                                gcode_lines.append(f"(Tool change suppressed: M6 T{tool_num})")
-                            else:
-                                gcode_lines.append(
-                                    f"{comment_symbol} Tool change suppressed: M6 T{tool_num}"
-                                )
-                    else:
-                        # No machine config - check suppression before outputting M6
-                        if id(item) not in self._suppress_tool_change_m6:
-                            tool_num = item.ToolNumber
-                            m6_cmd = f"M6 T{tool_num}"
-                            gcode_lines.append(m6_cmd)
-
-                            # Output G43 commands if they were added in Stage 2.6
-                            g43_commands = self._tool_change_g43_commands.get(id(item), [])
-                            for g43_cmd in g43_commands:
-                                gcode_g43 = self.convert_command_to_gcode(g43_cmd)
-                                if gcode_g43 is not None and gcode_g43.strip():
-                                    gcode_lines.append(gcode_g43)
-                elif hasattr(item, "Label") and item.Label == "Fixture":  # FIXTURE
+                elif item.item_type == "fixture":  # FIXTURE
                     if self._machine and self._machine.postprocessor_properties.get(
                         "pre_fixture_change"
                     ):
@@ -1490,7 +1395,7 @@ class PostProcessor:
                             if line.strip()
                         ]
                         gcode_lines.extend(pre_lines)
-                elif hasattr(item, "Proxy"):  # OPERATION
+                elif item.item_type == "operation":  # OPERATION
                     if self._machine and self._machine.postprocessor_properties.get(
                         "pre_operation"
                     ):
@@ -1504,11 +1409,11 @@ class PostProcessor:
                         gcode_lines.extend(pre_lines)
 
                 # Convert Path commands to G-code
-                if hasattr(item, "Path") and item.Path:
+                if item.path:
                     # Group consecutive rotary moves together
                     in_rotary_group = False
 
-                    for cmd in item.Path.Commands:
+                    for cmd in item.path.Commands:
                         try:
                             # Check if this command involves a rotary axis move
                             has_rotary = any(param in cmd.Parameters for param in ["A", "B", "C"])
@@ -1569,8 +1474,11 @@ class PostProcessor:
                                 gcode_lines.append(gcode)
 
                         except (ValueError, AttributeError) as e:
+                            # FIXME: this silently consumes coding errors
+                            # FIXME: make an exception type for the actual meaning
                             # Skip unsupported commands or log error
                             Path.Log.debug(f"Skipping command {cmd.Name}: {e}")
+                            raise e
 
                     # Close rotary group if we ended while still in one
                     if in_rotary_group:
@@ -1587,7 +1495,7 @@ class PostProcessor:
                             gcode_lines.extend(post_rotary_lines)
 
                 # Add appropriate post-blocks
-                if hasattr(item, "ToolNumber"):  # TOOLCHANGE
+                if item.item_type == "tool_controller":  # TOOLCHANGE
                     if self._machine and self._machine.postprocessor_properties.get(
                         "post_tool_change"
                     ):
@@ -1599,7 +1507,6 @@ class PostProcessor:
                             if line.strip()
                         ]
                         gcode_lines.extend(post_lines)
-                    # Add tool_return after tool change
                     if self._machine and self._machine.postprocessor_properties.get("tool_return"):
                         return_lines = [
                             line
@@ -1609,7 +1516,7 @@ class PostProcessor:
                             if line.strip()
                         ]
                         gcode_lines.extend(return_lines)
-                elif hasattr(item, "Label") and item.Label == "Fixture":  # FIXTURE
+                elif item.item_type == "fixture":  # FIXTURE
                     if self._machine and self._machine.postprocessor_properties.get(
                         "post_fixture_change"
                     ):
@@ -1621,7 +1528,7 @@ class PostProcessor:
                             if line.strip()
                         ]
                         gcode_lines.extend(post_lines)
-                elif hasattr(item, "Proxy"):  # OPERATION
+                elif item.item_type == "operation":  # OPERATION
                     if self._machine and self._machine.postprocessor_properties.get(
                         "post_operation"
                     ):
@@ -1635,32 +1542,49 @@ class PostProcessor:
                         gcode_lines.extend(post_lines)
 
             # ===== STAGE 4: G-CODE OPTIMIZATION =====
+            print("### G-CODE OPT")
             if gcode_lines:
+                print("### has gcode..")
                 # Separate header comments from numbered lines
                 num_header_lines = len(header_lines) if section_name == postables[0][0] else 0
                 header_part = gcode_lines[:num_header_lines]
                 body_part = gcode_lines[num_header_lines:]
+                print("---head\n" + "\n".join(header_part))
+                print("---body\n" + "\n".join(body_part))
+                print("---")
 
                 # Apply optimizations to body only (not header comments)
                 if body_part:
+                    print("### has body..")
                     # Modal command deduplication
                     # OUTPUT_DUPLICATE_COMMANDS: True = output all, False = suppress duplicates
+                    print(
+                        f'### remove Dup? {not self.values.get("OUTPUT_DUPLICATE_COMMANDS", True)}'
+                    )
                     if not self.values.get("OUTPUT_DUPLICATE_COMMANDS", True):
                         body_part = deduplicate_repeated_commands(body_part)
 
                     # Suppress redundant axis words (only if OUTPUT_DOUBLES is False)
                     # OUTPUT_DOUBLES: True = output all parameters, False = suppress duplicates
+                    print(f'### axis-modal? {not self.values.get("OUTPUT_DOUBLES", True)}')
                     if not self.values.get("OUTPUT_DOUBLES", True):
                         body_part = suppress_redundant_axes_words(body_part)
 
                 # Filter inefficient moves (optional optimization)
                 # Collapses redundant G0 rapid move chains - may be too aggressive for some machines
+                print(
+                    f'### pre G0 collapse? m? {not not self._machine} && "proc"? {hasattr(self._machine, "processing")}'
+                )
                 if body_part and self._machine and hasattr(self._machine, "processing"):
                     if hasattr(self._machine.processing, "filter_inefficient_moves"):
+                        print(
+                            f"### G0 collapse {self._machine.processing.filter_inefficient_moves}"
+                        )
                         if self._machine.processing.filter_inefficient_moves:
                             body_part = filter_inefficient_moves(body_part)
 
                 # Line numbering (only on body, not header comments)
+                print(f'### line-num? {not self.values.get("OUTPUT_LINE_NUMBERS", True)}')
                 if body_part and self.values.get("OUTPUT_LINE_NUMBERS", False):
                     start = 10
                     increment = 10
@@ -1914,12 +1838,7 @@ class PostProcessor:
         section: Section
         sublist: Sublist
 
-        # Get early_tool_prep setting from machine config
-        early_tool_prep = False
-        if self._machine and hasattr(self._machine, "processing"):
-            early_tool_prep = getattr(self._machine.processing, "early_tool_prep", False)
-
-        postables = self._buildPostList(early_tool_prep)
+        postables = self._buildPostList()
         Path.Log.debug(f"postables {postables}")
 
         Path.Log.debug(f"postables count: {len(postables)}")
@@ -2029,14 +1948,44 @@ class PostProcessor:
                 # Fall back to parent for other drill cycles
                 return super()._convert_drill_cycle(command)
         """
+        print(f"#== Proc convert({command})..")
+        WHERE = False
 
         # Validate command is supported
-        supported = Constants.GCODE_SUPPORTED + Constants.GCODE_FIXTURES + Constants.MCODE_SUPPORTED
+        # FIXME: shouldn't this be supported_commands?
+        # was: supported = Constants.GCODE_SUPPORTED + Constants.GCODE_FIXTURES + Constants.MCODE_SUPPORTED
+        if False:
+            print(  # DEBUG
+                f"---_machine\n{json.dumps(self._machine.to_dict(), sort_keys=True, indent=2)}\n---"
+                if self._machine is not None
+                else f"<NO _machine in {self.__class__.__name__}>"
+            )
+
+        if not command.Name:
+            raise Exception("No command.Name")
+
+        # FIXME: cache/lift out of the postables loop as this-machine's-supported
+        # FIXME: conditional `get` shouldn't be necessary: Processor-derived classes should have all from schema
+        # FIXME: is the conditional get only during tests? can the tests be fixed?
+        if s := getattr(self._machine, "properties", {}).get("supported_commands", None):
+            supported = s.split("\n")
+        else:
+            supported = (
+                Constants.GCODE_SUPPORTED
+                + Constants.MCODE_SUPPORTED
+                + Constants.GCODE_NON_CONFORMING
+            )
+
+        print(f"## supported {sorted(supported)}")
         if (
             command.Name not in supported
             and not command.Name.startswith("(")
-            and not command.Name.startswith("T")
+            and not command.Name.startswith("T")  # FIXME: why?
         ):
+            un = sorted(
+                getattr(self._machine, "properties", {}).get("supported_commands", "").split("\n")
+            )
+            print(f"#== out of {un}")
             raise ValueError(f"Unsupported command: {command.Name}")
 
         # Dispatch to appropriate hook method based on command type
@@ -2044,42 +1993,62 @@ class PostProcessor:
 
         # Comments
         if command_name.startswith("("):
+            if WHERE:
+                print("  ->comment")
             return self._convert_comment(command)
 
         # Rapid moves
         if command_name in Constants.GCODE_MOVE_RAPID:
+            if WHERE:
+                print("  ->rapid")
             return self._convert_rapid_move(command)
 
         # Linear moves
         if command_name in Constants.GCODE_MOVE_STRAIGHT:
+            if WHERE:
+                print("  ->linear")
             return self._convert_linear_move(command)
 
         # Arc moves
         if command_name in Constants.GCODE_MOVE_ARC:
+            if WHERE:
+                print("  ->arc")
             return self._convert_arc_move(command)
 
         # Drill cycles
         if command_name in Constants.GCODE_MOVE_DRILL + Constants.GCODE_DRILL_EXTENDED:
+            if WHERE:
+                print("  ->drill")
             return self._convert_drill_cycle(command)
 
         # Probe
         if command_name in Constants.GCODE_PROBE:
+            if WHERE:
+                print("  ->probe")
             return self._convert_probe(command)
 
         # Dwell
         if command_name in Constants.GCODE_DWELL:
+            if WHERE:
+                print("  ->dwell")
             return self._convert_dwell(command)
 
         # Tool change
         if command_name in Constants.MCODE_TOOL_CHANGE:
+            if WHERE:
+                print("  ->tool")
             return self._convert_tool_change(command)
 
         # Spindle control
         if command_name in Constants.MCODE_SPINDLE_ON + Constants.MCODE_SPINDLE_OFF:
+            if WHERE:
+                print("  ->spindle")
             return self._convert_spindle_command(command)
 
         # Coolant control
         if command_name in Constants.MCODE_COOLANT:
+            if WHERE:
+                print("  ->coolant")
             return self._convert_coolant_command(command)
 
         # Program control
@@ -2090,6 +2059,8 @@ class PostProcessor:
             + Constants.MCODE_END
             + Constants.MCODE_END_RESET
         ):
+            if WHERE:
+                print("  ->program")
             return self._convert_program_control(command)
 
         # Fixtures
@@ -2110,9 +2081,13 @@ class PostProcessor:
             + Constants.GCODE_SPINDLE_RPM
             + Constants.GCODE_RETURN_MODE
         ):
+            if WHERE:
+                print("  ->other modal")
             return self._convert_modal_command(command)
 
         # Fallback for any unhandled commands
+        if WHERE:
+            print("  ->generic")
         return self._convert_generic_command(command)
 
     def _convert_comment(self, command: Path.Command) -> str:
@@ -2160,33 +2135,12 @@ class PostProcessor:
         else:
             return f"{block_delete_string}{comment_symbol} {comment_text}"
 
-    def _convert_move(self, command: Path.Command) -> str:
-        """
-        Converts a rapid move command to gcode.
+    def format_parameter(self, parameter, value) -> str:
+        # Format an parameter w/precision
+        # if unknown parameter, just stringify as Pn
 
-        This method can be overridden by derived postprocessors to customize rapid move handling.
-        """
-        from Path.Post.UtilsParse import format_command_line
-
-        # Extract command components
-        command_name = command.Name
-        params = command.Parameters
-        annotations = command.Annotations
-
-        # Check for blockdelete annotation
-        block_delete_string = "/" if annotations.get("blockdelete") else ""
-
-        # Build command line
-        command_line = []
-        command_line.append(command_name)
-
-        # Format parameters with clean, stateless implementation
-        parameter_order = self.values.get(
-            "PARAMETER_ORDER", ["X", "Y", "Z", "F", "I", "J", "K", "R", "Q", "P"]
-        )
-
-        def format_axis_param(value):
-            """Format axis parameter with unit conversion and precision."""
+        def _convert_axis_param(value):
+            """axis parameter unit conversion"""
             # Apply unit conversion based on machine units setting
             is_imperial = False
             if self._machine and hasattr(self._machine, "output"):
@@ -2200,30 +2154,28 @@ class PostProcessor:
 
             if is_imperial:
                 converted_value = value / 25.4  # Convert mm to inches
+                print(f"  ## imperial = {converted_value}")
             else:
                 converted_value = value  # Keep as mm
+            return converted_value
 
+        def format_axis_param(value):
+            converted_value = _convert_axis_param(value)
             precision = self.values.get("AXIS_PRECISION") or 3
-            return f"{converted_value:.{precision}f}"
+            return f"{converted_value:.{precision}f}"  # FIXME: round then precision
 
-        def format_feed_param(value):
+        def format_feed_param(feed_value):
             """Format feed parameter with speed precision and unit conversion."""
-            # Convert from mm/sec to mm/min (multiply by 60)
-            feed_value = value * 60.0
+            feed_value = _convert_axis_param(feed_value)
+            print(f"### feed {feed_value}")
 
-            # Apply unit conversion if imperial
-            is_imperial = False
-            if self._machine and hasattr(self._machine, "output"):
-                from Machine.models.machine import OutputUnits
-
-                is_imperial = self._machine.output.units == OutputUnits.IMPERIAL
+            # There are actually oddball controls that use {units}/second feedrate.
+            if self._machine and hasattr(self._machine, "feedrate_per_second"):
+                # Check if feedrate is in seconds or minutes
+                feed_value = feed_value
             else:
-                # Fallback to legacy UNITS value
-                units = self.values.get("UNITS", "G21")
-                is_imperial = units == "G20"
-
-            if is_imperial:
-                feed_value = feed_value / 25.4  # Convert mm/min to in/min
+                # Convert from mm/sec to mm/min (multiply by 60)
+                feed_value = feed_value * 60.0
 
             precision = self.values.get("FEED_PRECISION") or 3
             return f"{feed_value:.{precision}f}"
@@ -2268,6 +2220,38 @@ class PostProcessor:
             "L": format_int_param,
             "T": format_int_param,
         }
+        if parameter in param_formatters:
+            formatted_value = param_formatters[parameter](value)
+        else:
+            # Default formatting for unhandled parameters
+            formatted_value = f"{parameter}{value}"
+        return formatted_value
+
+    def _convert_move(self, command: Path.Command) -> str:
+        """
+        Converts a rapid move command to gcode.
+
+        This method can be overridden by derived postprocessors to customize rapid move handling.
+        """
+        from Path.Post.UtilsParse import format_command_line
+
+        # Extract command components
+        command_name = command.Name
+        params = command.Parameters
+        annotations = command.Annotations
+        print(f"## Proc _convert_move {command}")
+
+        # Check for blockdelete annotation
+        block_delete_string = "/" if annotations.get("blockdelete") else ""
+
+        # Build command line
+        command_line = []
+        command_line.append(command_name)
+
+        # Format parameters with clean, stateless implementation
+        parameter_order = self.values.get(
+            "PARAMETER_ORDER", ["X", "Y", "Z", "F", "I", "J", "K", "R", "Q", "P"]
+        )
 
         for parameter in parameter_order:
             if parameter in params:
@@ -2281,18 +2265,13 @@ class PostProcessor:
                     ):
                         continue  # Skip this parameter
 
-                if parameter in param_formatters:
-                    formatted_value = param_formatters[parameter](params[parameter])
-                    command_line.append(f"{parameter}{formatted_value}")
-                    # Update modal state
-                    self._modal_state[parameter] = params[parameter]
-                else:
-                    # Default formatting for unhandled parameters
-                    command_line.append(f"{parameter}{params[parameter]}")
-                    # Update modal state for unhandled parameters too
-                    self._modal_state[parameter] = params[parameter]
+                formatted_value = self.format_parameter(parameter, params[parameter])
+                command_line.append(f"{parameter}{formatted_value}")
+                # Update modal state
+                self._modal_state[parameter] = params[parameter]
 
         # Handle tool length offset (G43) suppression
+        # FIXME: lift to stage 2
         if command_name in ("G43",):
             if not self.values.get("OUTPUT_TOOL_LENGTH_OFFSET", True):
                 # Tool length offset disabled - suppress G43 command
@@ -2320,6 +2299,7 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize linear move handling.
         """
+        print(f"## linear {command}")
         return self._convert_move(command)
 
     def _convert_arc_move(self, command: Path.Command) -> str:
@@ -2392,6 +2372,7 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize fixture handling.
         """
+        # FIXME: Not a move
         return self._convert_move(command)
 
     def _convert_modal_command(self, command: Path.Command) -> str:
@@ -2408,6 +2389,7 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize generic handling.
         """
+        print(f"#== generic {command}")
         return self._convert_move(command)
 
 
@@ -2441,12 +2423,7 @@ class WrapperPost(PostProcessor):
     def export(self):
         """Dynamically reload the module for the export to ensure up-to-date usage."""
 
-        # Get early_tool_prep setting from machine config
-        early_tool_prep = False
-        if self._machine and hasattr(self._machine, "processing"):
-            early_tool_prep = getattr(self._machine.processing, "early_tool_prep", False)
-
-        postables = self._buildPostList(early_tool_prep)
+        postables = self._buildPostList()
         Path.Log.debug(f"postables count: {len(postables)}")
 
         g_code_sections = []
