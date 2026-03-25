@@ -860,7 +860,9 @@ class PostProcessor:
         if self.values.get("OUTPUT_HEADER", True):
             for section_name, sublist in postables:
                 for item in sublist:
-                    if item.item_type == "tool_controller":
+                    if hasattr(item, "ToolNumber"):  # Tool controller
+                        # Check if tools should be listed in header
+
                         list_tools = True
                         if (
                             self._machine
@@ -926,10 +928,10 @@ class PostProcessor:
             has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
 
             if has_drill_cycles:
-                item.path = PostUtils.cannedCycleTerminator(item.path)
+                item.Path = PostUtils.cannedCycleTerminator(item.Path)
 
         def replace_drill_cycles(item):
-            print(f"#== replace ?: {item.path.Commands}")
+            print(f"#== replace ?: {item.Path.Commands}")
             translated = []
 
             mock_values = {
@@ -954,7 +956,7 @@ class PostProcessor:
                 p.setFromGCode(gcode_str)
                 return p
 
-            for command in item.path.Commands:
+            for command in item.Path.Commands:
                 if command.Name in to_translate:
                     gcode_str_list = []
                     drill_translate(
@@ -971,13 +973,13 @@ class PostProcessor:
                 else:
                     translated.append(command)
 
-            item.path = Path.Path(translated)
-            print(f"#== replace rez  : {item.path.Commands}")
+            item.Path = Path.Path(translated)
+            print(f"#== replace rez  : {item.Path.Commands}")
 
         for section_name, sublist in postables:
             for item in sublist:
                 has_drill_cycles = False
-                if item.path:
+                if item.Path:
                     if to_translate:
                         replace_drill_cycles(item)
                     else:
@@ -1430,9 +1432,9 @@ class PostProcessor:
         """
         for p in postables:
             if..
-                newlist = (canned(cmd) for cmd in item.path.Commands)
+                newlist = (canned(cmd) for cmd in item.Path.Commands)
                 newlist = (splitarcs(cmd) for cmd in newlist)
-                item.path = Path.Path(newlist)
+                item.Path = Path.Path(newlist)
         """
 
         Path.Log.debug(postables)
