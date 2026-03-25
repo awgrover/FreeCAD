@@ -364,7 +364,7 @@ class PostProcessor:
                 "name": "drill_cycles_to_translate",
                 "type": "text",
                 "label": translate("CAM", "Drill Cycles to Translate"),
-                "default": "\n".join(Constants.GCODE_MOVE_DRILL),
+                "default": "\n".join(Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL),
                 "help": translate(
                     "CAM",
                     "List of drill cycle commands to translate to G0/G1 moves (one per line). "
@@ -902,6 +902,7 @@ class PostProcessor:
                 has_drill_cycles = False
                 if hasattr(item, "Path") and item.Path:
                     drill_commands = [
+                        # FIXME: use Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL
                         "G73",
                         "G74",
                         "G81",
@@ -909,15 +910,16 @@ class PostProcessor:
                         "G83",
                         "G84",
                         "G85",
-                        "G86",
-                        "G87",
+                        "G86",  # FIXME: not in Constants
+                        "G87",  # FIXME: not in Constants
                         "G88",
                         "G89",
                     ]
+
                     has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
 
                 if has_drill_cycles:
-                    item.Path = PostUtils.cannedCycleTerminator(item.Path)
+                    item.path = PostUtils.cannedCycleTerminator(item.Path)
 
     def _expand_split_arcs(self, postables):
         """Split arc commands into linear segments if configured.
@@ -1310,6 +1312,7 @@ class PostProcessor:
             insert_line_numbers,
         )
 
+        print(f"### EXPORT2")
         Path.Log.debug("Starting export2()")
 
         # ===== STAGE 0: PRE-PROCESSING DIALOG =====
@@ -1331,6 +1334,14 @@ class PostProcessor:
         # ===== STAGE 1: ORDERING =====
         # Process all jobs (currently only first job supported)
         all_job_sections = []
+
+        def bad():  # DEBUG
+            for section_name, sublist in postables:
+                for item in sublist:
+                    if hasattr(item, "Path"):
+                        for cmd in item.Path.Commands:
+                            if cmd.Name == "G98":
+                                raise Exception(f"Bob {cmd}")
 
         # Get early_tool_prep setting from machine config
         early_tool_prep = False
@@ -1569,8 +1580,11 @@ class PostProcessor:
                                 gcode_lines.append(gcode)
 
                         except (ValueError, AttributeError) as e:
+                            # FIXME: this silently consumes coding errors
+                            # FIXME: make an exception type for the actual meaning
                             # Skip unsupported commands or log error
                             Path.Log.debug(f"Skipping command {cmd.Name}: {e}")
+                            raise e
 
                     # Close rotary group if we ended while still in one
                     if in_rotary_group:
@@ -1635,32 +1649,49 @@ class PostProcessor:
                         gcode_lines.extend(post_lines)
 
             # ===== STAGE 4: G-CODE OPTIMIZATION =====
+            print("### G-CODE OPT")
             if gcode_lines:
+                print("### has gcode..")
                 # Separate header comments from numbered lines
                 num_header_lines = len(header_lines) if section_name == postables[0][0] else 0
                 header_part = gcode_lines[:num_header_lines]
                 body_part = gcode_lines[num_header_lines:]
+                print("---head\n" + "\n".join(header_part))
+                print("---body\n" + "\n".join(body_part))
+                print("---")
 
                 # Apply optimizations to body only (not header comments)
                 if body_part:
+                    print("### has body..")
                     # Modal command deduplication
                     # OUTPUT_DUPLICATE_COMMANDS: True = output all, False = suppress duplicates
+                    print(
+                        f'### remove Dup? {not self.values.get("OUTPUT_DUPLICATE_COMMANDS", True)}'
+                    )
                     if not self.values.get("OUTPUT_DUPLICATE_COMMANDS", True):
                         body_part = deduplicate_repeated_commands(body_part)
 
                     # Suppress redundant axis words (only if OUTPUT_DOUBLES is False)
                     # OUTPUT_DOUBLES: True = output all parameters, False = suppress duplicates
+                    print(f'### axis-modal? {not self.values.get("OUTPUT_DOUBLES", True)}')
                     if not self.values.get("OUTPUT_DOUBLES", True):
                         body_part = suppress_redundant_axes_words(body_part)
 
                 # Filter inefficient moves (optional optimization)
                 # Collapses redundant G0 rapid move chains - may be too aggressive for some machines
+                print(
+                    f'### pre G0 collapse? m? {not not self._machine} && "proc"? {hasattr(self._machine, "processing")}'
+                )
                 if body_part and self._machine and hasattr(self._machine, "processing"):
                     if hasattr(self._machine.processing, "filter_inefficient_moves"):
+                        print(
+                            f"### G0 collapse {self._machine.processing.filter_inefficient_moves}"
+                        )
                         if self._machine.processing.filter_inefficient_moves:
                             body_part = filter_inefficient_moves(body_part)
 
                 # Line numbering (only on body, not header comments)
+                print(f'### line-num? {not self.values.get("OUTPUT_LINE_NUMBERS", True)}')
                 if body_part and self.values.get("OUTPUT_LINE_NUMBERS", False):
                     start = 10
                     increment = 10
@@ -2029,14 +2060,44 @@ class PostProcessor:
                 # Fall back to parent for other drill cycles
                 return super()._convert_drill_cycle(command)
         """
+        print(f"#== Proc convert({command})..")
+        WHERE = False
 
         # Validate command is supported
-        supported = Constants.GCODE_SUPPORTED + Constants.GCODE_FIXTURES + Constants.MCODE_SUPPORTED
+        # FIXME: shouldn't this be supported_commands?
+        # was: supported = Constants.GCODE_SUPPORTED + Constants.GCODE_FIXTURES + Constants.MCODE_SUPPORTED
+        if False:
+            print(  # DEBUG
+                f"---_machine\n{json.dumps(self._machine.to_dict(), sort_keys=True, indent=2)}\n---"
+                if self._machine is not None
+                else f"<NO _machine in {self.__class__.__name__}>"
+            )
+
+        if not command.Name:
+            raise Exception("No command.Name")
+
+        # FIXME: cache/lift out of the postables loop as this-machine's-supported
+        # FIXME: conditional `get` shouldn't be necessary: Processor-derived classes should have all from schema
+        # FIXME: is the conditional get only during tests? can the tests be fixed?
+        if s := getattr(self._machine, "properties", {}).get("supported_commands", None):
+            supported = s.split("\n")
+        else:
+            supported = (
+                Constants.GCODE_SUPPORTED
+                + Constants.MCODE_SUPPORTED
+                + Constants.GCODE_NON_CONFORMING
+            )
+
+        print(f"## supported {sorted(supported)}")
         if (
             command.Name not in supported
             and not command.Name.startswith("(")
-            and not command.Name.startswith("T")
+            and not command.Name.startswith("T")  # FIXME: why?
         ):
+            un = sorted(
+                getattr(self._machine, "properties", {}).get("supported_commands", "").split("\n")
+            )
+            print(f"#== out of {un}")
             raise ValueError(f"Unsupported command: {command.Name}")
 
         # Dispatch to appropriate hook method based on command type
@@ -2044,42 +2105,62 @@ class PostProcessor:
 
         # Comments
         if command_name.startswith("("):
+            if WHERE:
+                print("  ->comment")
             return self._convert_comment(command)
 
         # Rapid moves
         if command_name in Constants.GCODE_MOVE_RAPID:
+            if WHERE:
+                print("  ->rapid")
             return self._convert_rapid_move(command)
 
         # Linear moves
         if command_name in Constants.GCODE_MOVE_STRAIGHT:
+            if WHERE:
+                print("  ->linear")
             return self._convert_linear_move(command)
 
         # Arc moves
         if command_name in Constants.GCODE_MOVE_ARC:
+            if WHERE:
+                print("  ->arc")
             return self._convert_arc_move(command)
 
         # Drill cycles
         if command_name in Constants.GCODE_MOVE_DRILL + Constants.GCODE_DRILL_EXTENDED:
+            if WHERE:
+                print("  ->drill")
             return self._convert_drill_cycle(command)
 
         # Probe
         if command_name in Constants.GCODE_PROBE:
+            if WHERE:
+                print("  ->probe")
             return self._convert_probe(command)
 
         # Dwell
         if command_name in Constants.GCODE_DWELL:
+            if WHERE:
+                print("  ->dwell")
             return self._convert_dwell(command)
 
         # Tool change
         if command_name in Constants.MCODE_TOOL_CHANGE:
+            if WHERE:
+                print("  ->tool")
             return self._convert_tool_change(command)
 
         # Spindle control
         if command_name in Constants.MCODE_SPINDLE_ON + Constants.MCODE_SPINDLE_OFF:
+            if WHERE:
+                print("  ->spindle")
             return self._convert_spindle_command(command)
 
         # Coolant control
         if command_name in Constants.MCODE_COOLANT:
+            if WHERE:
+                print("  ->coolant")
             return self._convert_coolant_command(command)
 
         # Program control
@@ -2090,6 +2171,8 @@ class PostProcessor:
             + Constants.MCODE_END
             + Constants.MCODE_END_RESET
         ):
+            if WHERE:
+                print("  ->program")
             return self._convert_program_control(command)
 
         # Fixtures
@@ -2110,9 +2193,13 @@ class PostProcessor:
             + Constants.GCODE_SPINDLE_RPM
             + Constants.GCODE_RETURN_MODE
         ):
+            if WHERE:
+                print("  ->other modal")
             return self._convert_modal_command(command)
 
         # Fallback for any unhandled commands
+        if WHERE:
+            print("  ->generic")
         return self._convert_generic_command(command)
 
     def _convert_comment(self, command: Path.Command) -> str:
@@ -2160,33 +2247,12 @@ class PostProcessor:
         else:
             return f"{block_delete_string}{comment_symbol} {comment_text}"
 
-    def _convert_move(self, command: Path.Command) -> str:
-        """
-        Converts a rapid move command to gcode.
+    def format_parameter(self, parameter, value) -> str:
+        # Format an parameter w/precision
+        # if unknown parameter, just stringify as Pn
 
-        This method can be overridden by derived postprocessors to customize rapid move handling.
-        """
-        from Path.Post.UtilsParse import format_command_line
-
-        # Extract command components
-        command_name = command.Name
-        params = command.Parameters
-        annotations = command.Annotations
-
-        # Check for blockdelete annotation
-        block_delete_string = "/" if annotations.get("blockdelete") else ""
-
-        # Build command line
-        command_line = []
-        command_line.append(command_name)
-
-        # Format parameters with clean, stateless implementation
-        parameter_order = self.values.get(
-            "PARAMETER_ORDER", ["X", "Y", "Z", "F", "I", "J", "K", "R", "Q", "P"]
-        )
-
-        def format_axis_param(value):
-            """Format axis parameter with unit conversion and precision."""
+        def _convert_axis_param(value):
+            """axis parameter unit conversion"""
             # Apply unit conversion based on machine units setting
             is_imperial = False
             if self._machine and hasattr(self._machine, "output"):
@@ -2200,36 +2266,28 @@ class PostProcessor:
 
             if is_imperial:
                 converted_value = value / 25.4  # Convert mm to inches
+                print(f"  ## imperial = {converted_value}")
             else:
                 converted_value = value  # Keep as mm
+            return converted_value
 
+        def format_axis_param(value):
+            converted_value = _convert_axis_param(value)
             precision = self.values.get("AXIS_PRECISION") or 3
-            return f"{converted_value:.{precision}f}"
+            return f"{converted_value:.{precision}f}"  # FIXME: round then precision
 
-        def format_feed_param(value):
+        def format_feed_param(feed_value):
             """Format feed parameter with speed precision and unit conversion."""
+            feed_value = _convert_axis_param(feed_value)
+            print(f"### feed {feed_value}")
 
-            # There are actually oddball controls that use mm/second feedrate.
+            # There are actually oddball controls that use {units}/second feedrate.
             if self._machine and hasattr(self._machine, "feedrate_per_second"):
                 # Check if feedrate is in seconds or minutes
-                feed_value = value
+                feed_value = feed_value
             else:
                 # Convert from mm/sec to mm/min (multiply by 60)
-                feed_value = value * 60.0
-
-            # Apply unit conversion if imperial
-            is_imperial = False
-            if self._machine and hasattr(self._machine, "output"):
-                from Machine.models.machine import OutputUnits
-
-                is_imperial = self._machine.output.units == OutputUnits.IMPERIAL
-            else:
-                # Fallback to legacy UNITS value
-                units = self.values.get("UNITS", "G21")
-                is_imperial = units == "G20"
-
-            if is_imperial:
-                feed_value = feed_value / 25.4  # Convert mm/min to in/min
+                feed_value = feed_value * 60.0
 
             precision = self.values.get("FEED_PRECISION") or 3
             return f"{feed_value:.{precision}f}"
@@ -2274,6 +2332,38 @@ class PostProcessor:
             "L": format_int_param,
             "T": format_int_param,
         }
+        if parameter in param_formatters:
+            formatted_value = param_formatters[parameter](value)
+        else:
+            # Default formatting for unhandled parameters
+            formatted_value = f"{parameter}{value}"
+        return formatted_value
+
+    def _convert_move(self, command: Path.Command) -> str:
+        """
+        Converts a rapid move command to gcode.
+
+        This method can be overridden by derived postprocessors to customize rapid move handling.
+        """
+        from Path.Post.UtilsParse import format_command_line
+
+        # Extract command components
+        command_name = command.Name
+        params = command.Parameters
+        annotations = command.Annotations
+        print(f"## Proc _convert_move {command}")
+
+        # Check for blockdelete annotation
+        block_delete_string = "/" if annotations.get("blockdelete") else ""
+
+        # Build command line
+        command_line = []
+        command_line.append(command_name)
+
+        # Format parameters with clean, stateless implementation
+        parameter_order = self.values.get(
+            "PARAMETER_ORDER", ["X", "Y", "Z", "F", "I", "J", "K", "R", "Q", "P"]
+        )
 
         for parameter in parameter_order:
             if parameter in params:
@@ -2287,18 +2377,13 @@ class PostProcessor:
                     ):
                         continue  # Skip this parameter
 
-                if parameter in param_formatters:
-                    formatted_value = param_formatters[parameter](params[parameter])
-                    command_line.append(f"{parameter}{formatted_value}")
-                    # Update modal state
-                    self._modal_state[parameter] = params[parameter]
-                else:
-                    # Default formatting for unhandled parameters
-                    command_line.append(f"{parameter}{params[parameter]}")
-                    # Update modal state for unhandled parameters too
-                    self._modal_state[parameter] = params[parameter]
+                formatted_value = self.format_parameter(parameter, params[parameter])
+                command_line.append(f"{parameter}{formatted_value}")
+                # Update modal state
+                self._modal_state[parameter] = params[parameter]
 
         # Handle tool length offset (G43) suppression
+        # FIXME: lift to stage 2
         if command_name in ("G43",):
             if not self.values.get("OUTPUT_TOOL_LENGTH_OFFSET", True):
                 # Tool length offset disabled - suppress G43 command
@@ -2326,6 +2411,7 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize linear move handling.
         """
+        print(f"## linear {command}")
         return self._convert_move(command)
 
     def _convert_arc_move(self, command: Path.Command) -> str:
@@ -2398,6 +2484,7 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize fixture handling.
         """
+        # FIXME: Not a move
         return self._convert_move(command)
 
     def _convert_modal_command(self, command: Path.Command) -> str:
@@ -2414,6 +2501,7 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize generic handling.
         """
+        print(f"#== generic {command}")
         return self._convert_move(command)
 
 
