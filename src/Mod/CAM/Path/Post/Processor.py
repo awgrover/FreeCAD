@@ -919,7 +919,7 @@ class PostProcessor:
                     has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
 
                 if has_drill_cycles:
-                    item.path = PostUtils.cannedCycleTerminator(item.Path)
+                    item.Path = PostUtils.cannedCycleTerminator(item.Path)
 
     def _expand_split_arcs(self, postables):
         """Split arc commands into linear segments if configured.
