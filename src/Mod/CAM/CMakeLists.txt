@@ -510,6 +510,7 @@ SET(Tests_SRCS
     CAMTests/Drilling_1.FCStd
     CAMTests/FilePathTestUtils.py
     CAMTests/PathTestUtils.py
+    CAMTests/TestPathUtilsParse.py
     CAMTests/PostTestMocks.py
     CAMTests/test_adaptive.fcstd
     CAMTests/test_profile.fcstd
