@@ -431,9 +431,10 @@ def drill_translate(
         # force absolute coordinates during cycles
         gcode.append(f"{linenumber(values)}G90")
 
-    drill_x = Units.Quantity(params["X"], Units.Length)
-    drill_y = Units.Quantity(params["Y"], Units.Length)
-    drill_z = Units.Quantity(params["Z"], Units.Length)
+    drill_x = Units.Quantity(params.get("X", motion_location["X"]), Units.Length)
+    drill_y = Units.Quantity(params.get("Y", motion_location["Y"]), Units.Length)
+    drill_z = Units.Quantity(params.get("Z", motion_location["Z"]), Units.Length)
+    # FIXME: Are other params modal: should we default to motion_location, as if it were the modal_state?
     retract_z = Units.Quantity(params["R"], Units.Length)
     if retract_z < drill_z:  # R less than Z is error
         comment = create_comment(values, "Drill cycle error: R less than Z")
@@ -450,7 +451,8 @@ def drill_translate(
 
     cmd = format_command_line(values, ["G0", f"Z{format_for_axis(values, retract_z)}"])
     G0_retract_z = f"{cmd}"
-    cmd = format_for_feed(values, Units.Quantity(params["F"], Units.Velocity))
+    # FIXME: e.g. should we be getting F from motion_location?
+    cmd = format_for_feed(values, Units.Quantity(params.get("F", motion_location["Z"]), Units.Velocity))
     F_feedrate = f'{values["COMMAND_SPACE"]}F{cmd}'
 
     # preliminary movement(s)

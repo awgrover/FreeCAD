@@ -309,11 +309,11 @@ def defaultPostProcessorArgs():
 
 
 def defaultGeometryTolerance():
-    return preferences().GetFloat(GeometryTolerance, 0.01)
+    return preferences().GetFloat(GeometryTolerance, 0.01) or 0.01
 
 
 def defaultLibAreaCurveAccuracy():
-    return preferences().GetFloat(LibAreaCurveAccuracy, 0.01)
+    return preferences().GetFloat(LibAreaCurveAccuracy, 0.01) or 0.01
 
 
 def defaultFilePath():

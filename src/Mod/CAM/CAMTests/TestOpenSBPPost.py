@@ -534,7 +534,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             for gstr in (
                 "G0X1Y2Z3 G1X4Y5Z6 G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
                 "G20 G21 G38.2X1Y2Z3 G54 G90 G91 G92X4Y5Z6 "
-                # "G73Z7 "
+                # The drill params don't necessarily make sense in these, we just need certain params:
+                "G73Z7R91Q1 G74Z11R12 G80 G81Z9R10 G82Z10R11P12 G83Z11R12Q2 G84Z12R13 G85Z1R2 G88Z30R31 G89Z3R4 "
                 "M0 M1 M3S1 M5 M6T2 M7 M8 M9 "
                 "(comment)"
             ).split(" ")
@@ -544,13 +545,13 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             # FIXME: can we have a Path.Command(gstring)?
             [p.setFromGCode(gstr) or p for p, gstr in handled_gcode],
         )
-        results = self.post.export2()
+        self.post.export2()
         self.assertTrue(True, "No Crash")
 
         # Did we cover all the opensbp_post supported gcodes?
         # remove the redundant x0n from known, we only test xn above
         all_supported = (
-            self.post.GCodeSupported - self.post.GCodeUnsupported - set(["G73"])  # FIXME: put back
+            self.post.GCodeSupported - self.post.GCodeUnsupported
         )
         untried = set([p for p in all_supported if not re.search(r"0\d$", p)]) - set(
             [p.Name for p, gstr in handled_gcode]
@@ -567,10 +568,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 + Constants.GCODE_NON_CONFORMING
             )
             - self.post.GCodeUnsupported
-            - set(
-                Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
-            )  # FIXME: put back drill
-            - set(["G80"])  # FIXME: put back drill
         )
         untried = set([p for p in all_possible if not re.search(r"0\d$", p)]) - set(
             [p.Name for p, gstr in handled_gcode]
