@@ -398,7 +398,7 @@ class OpenSBPPost(PostProcessor):
         """
         params = command.Parameters
 
-        # Leave as G-Code?
+        # Leave as G-Code
         if "Z" not in params:
             return super()._convert_arc_move(command)
 

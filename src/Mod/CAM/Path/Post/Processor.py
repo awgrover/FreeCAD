@@ -364,7 +364,7 @@ class PostProcessor:
                 "name": "drill_cycles_to_translate",
                 "type": "text",
                 "label": translate("CAM", "Drill Cycles to Translate"),
-                "default": "\n".join(Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL),
+                "default": "",
                 "help": translate(
                     "CAM",
                     "List of drill cycle commands to translate to G0/G1 moves (one per line). "
@@ -901,20 +901,13 @@ class PostProcessor:
             for item in sublist:
                 has_drill_cycles = False
                 if hasattr(item, "Path") and item.Path:
-                    drill_commands = [
-                        # FIXME: use Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL
-                        "G73",
-                        "G74",
-                        "G81",
-                        "G82",
-                        "G83",
-                        "G84",
-                        "G85",
+                    drill_commands = (
+                        Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL
+                        + [
                         "G86",  # FIXME: not in Constants
                         "G87",  # FIXME: not in Constants
-                        "G88",
-                        "G89",
-                    ]
+                        ]
+                    )
 
                     has_drill_cycles = any(cmd.Name in drill_commands for cmd in item.Path.Commands)
 
@@ -2063,9 +2056,6 @@ class PostProcessor:
         print(f"#== Proc convert({command})..")
         WHERE = False
 
-        # Validate command is supported
-        # FIXME: shouldn't this be supported_commands?
-        # was: supported = Constants.GCODE_SUPPORTED + Constants.GCODE_FIXTURES + Constants.MCODE_SUPPORTED
         if False:
             print(  # DEBUG
                 f"---_machine\n{json.dumps(self._machine.to_dict(), sort_keys=True, indent=2)}\n---"
@@ -2073,9 +2063,10 @@ class PostProcessor:
                 else f"<NO _machine in {self.__class__.__name__}>"
             )
 
-        if not command.Name:
+        if not command.Name: # DEBUG
             raise Exception("No command.Name")
 
+        # Validate command is supported
         # FIXME: cache/lift out of the postables loop as this-machine's-supported
         # FIXME: conditional `get` shouldn't be necessary: Processor-derived classes should have all from schema
         # FIXME: is the conditional get only during tests? can the tests be fixed?
@@ -2092,7 +2083,6 @@ class PostProcessor:
         if (
             command.Name not in supported
             and not command.Name.startswith("(")
-            and not command.Name.startswith("T")  # FIXME: why?
         ):
             un = sorted(
                 getattr(self._machine, "properties", {}).get("supported_commands", "").split("\n")
@@ -2283,7 +2273,7 @@ class PostProcessor:
 
             # There are actually oddball controls that use {units}/second feedrate.
             if self._machine and hasattr(self._machine, "feedrate_per_second"):
-                # Check if feedrate is in seconds or minutes
+                # FIXME: Check if feedrate is in seconds or minutes
                 feed_value = feed_value
             else:
                 # Convert from mm/sec to mm/min (multiply by 60)
