@@ -161,7 +161,7 @@ class ObjectJob:
         )
         obj.setEditorMode("CycleTime", 1)  # read-only
         obj.addProperty(
-            "App::PropertyDistance",
+            "App::PropertyLength",
             "GeometryTolerance",
             "Geometry",
             QT_TRANSLATE_NOOP(
@@ -723,6 +723,9 @@ class ObjectJob:
         return None
 
     def execute(self, obj):
+        if not obj.GeometryTolerance:
+            obj.GeometryTolerance = Path.Preferences.defaultGeometryTolerance()
+
         if getattr(obj, "Operations", None):
             # obj.Path = obj.Operations.Path
             self.getCycleTime()
