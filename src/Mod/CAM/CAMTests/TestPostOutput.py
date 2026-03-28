@@ -753,8 +753,10 @@ class TestExport2Integration(unittest.TestCase):
         """Test that export2() returns a non-empty list of (name, gcode) tuples."""
         from Path.Post.Processor import PostProcessor
 
-        post = PostProcessor(self.job, "", "", "mm")
-        results = post.export2()
+        machine = self._create_machine(
+            output_header=True, include_machine_name=True, line_numbers=False
+        )
+        results = self._run_export2(machine)
 
         self.assertIsNotNone(results, "export2 should return results")
         self.assertIsInstance(results, list)
