@@ -39,7 +39,7 @@ import Path.Base.Util as PathUtil
 import Path.Post.UtilsArguments as PostUtilsArguments
 import Path.Post.UtilsExport as PostUtilsExport
 import Path.Post.PostList as PostList
-from Path.Post.UtilsParse import drill_translate, format_command_line
+from Path.Post.UtilsParse import drill_translate, format_command_line, drill_translate_gcode
 
 import FreeCAD
 import Path
@@ -1016,7 +1016,7 @@ class PostProcessor:
                     params = { k:v for k,v in params.items() if v is not None }
 
                     print(f"modal_state {mock_modal_state}")
-                    drill_translate(
+                    drill_translate_gcode(
                         mock_values,
                         gcode_str_list,
                         command.Name,

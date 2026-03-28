@@ -402,8 +402,22 @@ def determine_adaptive_op(values: Values, pathobj) -> Tuple[bool, float, float]:
                 FreeCAD.Console.PrintWarning(f"Tool Controller Vertical Rapid Values are unset{nl}")
     return (adaptiveOp, opHorizRapid, opVertRapid)
 
-
 def drill_translate(
+    gcode : Path.Command,
+    modal_state : PathParameters,
+    drill_retract_mode: str # G98 or ???
+) -> [ Path.Command ]:
+    """Translate a drill g-code Path.Command to a list of Path.Commands
+    Assumes the internal units: mm and mm/sec etc.
+
+    Currently only cycles in XY are provided (G17).
+    XZ (G18) and YZ (G19) are not dealt with.
+    In other words only Z drilling can be translated.
+    """
+
+    return []
+
+def drill_translate_gcode(
     values: Values,
     gcode: Gcode,
     command: str,
@@ -411,7 +425,7 @@ def drill_translate(
     motion_location: PathParameters,
     drill_retract_mode: str,
 ) -> None:
-    """Translate drill cycles.
+    """Translate drill cycles for a str g-code and dict of params.
 
     Currently only cycles in XY are provided (G17).
     XZ (G18) and YZ (G19) are not dealt with.

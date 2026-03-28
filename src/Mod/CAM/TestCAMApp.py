@@ -106,6 +106,7 @@ from CAMTests.TestPathToolLibrarySerializer import (
 from CAMTests.TestPathToolChangeGenerator import TestPathToolChangeGenerator
 from CAMTests.TestPathToolController import TestPathToolController
 from CAMTests.TestPathUtil import TestPathUtil
+from CAMTests.TestPathUtilsParse import TestPathUtilsParse
 from CAMTests.TestPathVcarve import TestPathVcarve
 from CAMTests.TestPathVoronoi import TestPathVoronoi
 
