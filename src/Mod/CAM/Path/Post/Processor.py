@@ -957,7 +957,7 @@ class PostProcessor:
                 has_drill_cycles = False
                 if item.path:
                     drill_commands = (
-                        Constants.GCODE_DRILL_EXTENDED + GCODE_MOVE_DRILL
+                        Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
                         + [
                         "G86",  # FIXME: not in Constants
                         "G87",  # FIXME: not in Constants
