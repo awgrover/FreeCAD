@@ -29,6 +29,15 @@
 # *                                                                         *
 # ***************************************************************************
 
+class CAMException(Exception):
+    pass
+
+class CAMParameterRequiredError(CAMException):
+    pass
+
+class CAMValueError(CAMException):
+    pass
+
 import math
 import re
 from typing import Any, Callable, Dict, List, Tuple, Union
@@ -403,9 +412,10 @@ def determine_adaptive_op(values: Values, pathobj) -> Tuple[bool, float, float]:
     return (adaptiveOp, opHorizRapid, opVertRapid)
 
 def drill_translate(
-    gcode : Path.Command,
+    command : Path.Command,
+    motion_mode : str, # G90 or G91
     modal_state : PathParameters,
-    drill_retract_mode: str # G98 or ???
+    drill_retract_mode: str # G98 = modal_state[z], G99 = param R
 ) -> [ Path.Command ]:
     """Translate a drill g-code Path.Command to a list of Path.Commands
     Assumes the internal units: mm and mm/sec etc.
@@ -413,9 +423,111 @@ def drill_translate(
     Currently only cycles in XY are provided (G17).
     XZ (G18) and YZ (G19) are not dealt with.
     In other words only Z drilling can be translated.
+
+    NB: the result is Absolute mode (G90). Make sure used in that context
     """
 
-    return []
+    print(f"#pp drill_translate {command} <{motion_mode}> {modal_state}")
+
+    # you don't even have to check before calling
+    HANDLED = {"G81", "G82", "G73", "G83"}
+    if command.Name not in HANDLED:
+        return [ command ]
+
+    if drill_retract_mode not in [ "G98", "G99" ]:
+        raise CAMValueError(f"drill_translate expects a drill_retract_mode of G98 or G99, saw {drill_retract_mode.__class__.__name__}: {drill_retract_mode}")
+
+    def param(k, default=None):
+        # from command, then modal_state, then default if not None, then throw KeyError
+        if k in command.Parameters:
+            return command.Parameters[k]
+        elif k in modal_state:
+            return modal_state[k]
+        elif default is not None:
+            return default
+        else:
+            raise KeyError(k)
+
+    if param("L", 1) != 1:
+        xtra = f' (from modal_state, saw {modal_state["L"]})' if "L" not in command.Parameters else ""
+        raise CAMValueError(f"drill_translate for {command.toGCode()} does not allow an L != 1{xtra}")
+
+    all_params = {}
+    try:
+        # Full params for the command, from Path.Command, modal_state
+        for p in "XYZRF":
+            all_params[p] = param(p)
+        all_params["L"] = param("L", 1)
+        if command.Name in ["G81", "G82"]:
+            if command.Name == "G82":
+                all_params["P"] = param("P")
+            all_params["R"] = param("R")
+        elif command.Name in ["G73", "G83"]:
+            all_params["Q"] = param("Q")
+    except KeyError as e:
+        # FIXME: better message?
+        raise CAMParameterRequiredError(f"drill_translate for {command.toGCode()} requires a parameter, or previous modal state, for parameter {e}").with_traceback(e.__traceback__) from None
+
+    drill_x = Units.Quantity(all_params["X"], Units.Length)
+    drill_y = Units.Quantity(all_params["Y"], Units.Length)
+    drill_z = Units.Quantity(all_params["Z"], Units.Length)
+    retract_z = Units.Quantity(all_params["R"], Units.Length)
+    feedrate = Units.Quantity(all_params["F"], Units.Velocity)
+
+    translated = []
+
+    if motion_mode == "G91":
+        # force absolute coordinates during cycles
+        translated.append( Path.Command('G90') )
+
+    try:
+        motion_z = Units.Quantity(modal_state["Z"], Units.Length)
+        if motion_mode == "G91":
+            # fixup to absolute
+            drill_x += Units.Quantity(modal_state["X"], Units.Length)
+            drill_y += Units.Quantity(modal_state["Y"], Units.Length)
+            drill_z += motion_z
+            retract_z += motion_z
+    except KeyError as e:
+        # FIXME: better message?
+        xtra = " (for relative mode)" if motion_mode == "G91" else ""
+        raise CAMParameterRequiredError(f"drill_translate for {command.toGCode()} requires a previous modal state{xtra}, for parameter {e}").with_traceback(e.__traceback__) from None
+
+    if drill_retract_mode == "G98" and motion_z >= retract_z:
+        retract_z = motion_z
+
+    print(f"#pp R {retract_z} ?< {drill_z}")
+    if retract_z < drill_z:  # R less than Z is error
+        raise CAMValueError("drill_translate for {command.toGCode()} requires R >= Z, saw R={retract_z} and Z={drill_z}")
+
+    # FIXME: does it need to be separate Z motion? Does that imply it should be safe-height?
+    G0_retract_z = Path.Command("G0", {"Z" : retract_z.Value})
+    translated.append( G0_retract_z )
+    translated.append( Path.Command("G0", {"X" : drill_x.Value, "Y" : drill_y.Value}) )
+    if motion_z > retract_z:
+        # NIST GCODE 3.5.16.1 Preliminary and In-Between Motion says G0 to retract_z
+        # Here use G1 since retract height may be below surface !
+        translated.append( Path.Command("G1", {"Z" : retract_z}) )
+
+    if command.Name in ("G81", "G82"):
+        translated.extend( output_G81_G82_drill_moves(
+            command, 
+            all_params,
+            drill_z.Value,
+            G0_retract_z
+        ))
+
+    elif command.Name in ("G73", "G83"):
+        translated.extend( output_G73_G83_drill_moves(
+            command,
+            all_params,
+            drill_z.Value,
+            G0_retract_z
+        ))
+
+    eol="\n"
+    print(f"#pp result:---\n{ eol.join([x.toGCode() for x in translated]) }\n---")
+    return translated
 
 def drill_translate_gcode(
     values: Values,
@@ -445,12 +557,14 @@ def drill_translate_gcode(
         # force absolute coordinates during cycles
         gcode.append(f"{linenumber(values)}G90")
 
+    ##
     drill_x = Units.Quantity(params.get("X", motion_location["X"]), Units.Length)
     drill_y = Units.Quantity(params.get("Y", motion_location["Y"]), Units.Length)
     drill_z = Units.Quantity(params.get("Z", motion_location["Z"]), Units.Length)
     # FIXME: Are other params modal: should we default to motion_location, as if it were the modal_state?
     retract_z = Units.Quantity(params["R"], Units.Length)
     if retract_z < drill_z:  # R less than Z is error
+        # FIXME: should be a warning
         comment = create_comment(values, "Drill cycle error: R less than Z")
         gcode.append(f"{linenumber(values)}{comment}")
         return
@@ -489,11 +603,11 @@ def drill_translate_gcode(
 
         # drill moves
     if command in ("G81", "G82"):
-        output_G81_G82_drill_moves(
+        output_G81_G82_drill_moves_str(
             values, gcode, command, params, drill_z, F_feedrate, G0_retract_z
         )
     elif command in ("G73", "G83"):
-        output_G73_G83_drill_moves(
+        output_G73_G83_drill_moves_str(
             values, gcode, command, params, drill_z, retract_z, F_feedrate, G0_retract_z
         )
 
@@ -584,6 +698,61 @@ def linenumber(values: Values, space: Union[str, None] = None) -> str:
 
 
 def output_G73_G83_drill_moves(
+    command: Path.Command,
+    params: PathParameters,
+    drill_z: float,
+    G0_retract_z: Path.Command,
+) -> None:
+    """Output the movement G code for G73 and G83."""
+    a_bit: float
+    chip_breaker_height: float
+    clearance_depth: float
+    cmd: str
+    drill_step: float
+    next_stop_z: float
+    translated: [ Path.Command ]
+
+    drill_step = Units.Quantity(params["Q"], Units.Length)
+    if drill_step == 0:
+        return []
+
+    retract_z = Units.Quantity( G0_retract_z.Parameters["Z"], Units.Length )
+    last_stop_z = retract_z
+    # NIST 3.5.16.4 G83 Cycle:  "current hole bottom, backed off a bit."
+    a_bit = drill_step * 0.05
+    print(f"#pp {command} START: ")
+
+    translated = []
+    while True: # each drill_step
+        if last_stop_z != retract_z:
+            # rapid move to just short of last drilling depth
+            clearance_depth = last_stop_z + a_bit
+            translated.append( Path.Command("G0", {"Z": clearance_depth.Value}) )
+        next_stop_z = last_stop_z - drill_step
+        print(f"#pp g83 done if next_stop_z ({next_stop_z}) <= drill_z {drill_z}")
+        if next_stop_z > drill_z:
+            print(f"#pp   g83 g1 down to {next_stop_z}")
+            translated.append( Path.Command("G1", {"Z": next_stop_z.Value, "F": command.Parameters["F"]}) )
+            print(f"#pp     translated {translated}")
+            if command.Name == "G73":
+                # Rapid up "a small amount".
+                chip_breaker_height = next_stop_z + values["CHIPBREAKING_AMOUNT"]
+                translated.append( Path.Command("G0", {"Z": chip_breaker_height}) )
+            elif command.Name == "G83":
+                # Rapid up to the retract height
+                print(f'#pp   g83 g0 up to {G0_retract_z.Parameters["Z"]}')
+                translated.append( Path.Command("G0", {"Z": G0_retract_z.Parameters["Z"]}) )
+            last_stop_z = next_stop_z
+        else:
+            translated.append( Path.Command("G1", {"Z": drill_z, "F": command.Parameters["F"]}) )
+            translated.append( G0_retract_z )
+            break
+
+    print(f"#pp g83 translated {translated}")
+    return translated
+
+
+def output_G73_G83_drill_moves_str( # OBS
     values: Values,
     gcode: Gcode,
     command: str,
@@ -645,6 +814,24 @@ def output_G73_G83_drill_moves(
 
 
 def output_G81_G82_drill_moves(
+    command : Path.Command,
+    params: PathParameters, # with modal_state
+    drill_z: float, # corrected for abs/rel
+    G0_retract_z: Path.Command,
+) -> [ Path.Command ]:
+    """Output the movement G code for G81 and G82."""
+    cmd: str
+
+    translated = []
+    translated.append( Path.Command( "G1", {"Z" : drill_z, "F" : params["F"]}) )
+    # pause where applicable
+    if command.Name == "G82":
+        translated.append( Path.Command( "G4", {"P" : params["P"]}) )
+    translated.append( G0_retract_z )
+
+    return translated
+
+def output_G81_G82_drill_moves_str( # OBS
     values: Values,
     gcode: Gcode,
     command: str,
