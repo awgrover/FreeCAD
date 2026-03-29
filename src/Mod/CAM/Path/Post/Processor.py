@@ -990,6 +990,7 @@ class PostProcessor:
                 "FEED_PRECISION": 3,
                 "OUTPUT_LINE_NUMBERS": False,
                 "CHIPBREAKING_AMOUNT" : FreeCAD.Units.Quantity("10.0 mm"), # FIXME: in internal units (mm), value from where...
+                "COMMENT_SYMBOL": "(",
             }
             mock_modal_state = {  # self._modal_state, # FIXME: not being tracked
                 "Z": 0,
@@ -2367,8 +2368,9 @@ class PostProcessor:
         command_line.append(command_name)
 
         # Format parameters with clean, stateless implementation
+        # FIXME: move parameter_order to Constants? cf. UtilsParse.py and anywhere else that makes gcode
         parameter_order = self.values.get(
-            "PARAMETER_ORDER", ["X", "Y", "Z", "F", "I", "J", "K", "R", "Q", "P"]
+            "PARAMETER_ORDER", Constants.PARAMETER_ORDER
         )
 
         for parameter in parameter_order:

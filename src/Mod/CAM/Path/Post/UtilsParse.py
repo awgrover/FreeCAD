@@ -45,6 +45,7 @@ from typing import Any, Callable, Dict, List, Tuple, Union
 import FreeCAD
 from FreeCAD import Units
 
+import Constants
 import Path
 import Path.Post.Utils as PostUtils
 
@@ -106,10 +107,6 @@ def check_for_drill_translate(
             )
         except (ArithmeticError, LookupError) as err:
             print("exception occurred", err)
-        # drill_translate uses G90 mode internally, so need to
-        # switch back to G91 mode if it was that way originally
-        if values["MOTION_MODE"] == "G91":
-            gcode.append(f"{linenumber(values)}G91")
         return True
     return False
 
@@ -430,7 +427,7 @@ def drill_translate(
         that need it wants to be expanded.
     """
 
-    print(f"#pp drill_translate {command} <{motion_mode}> {modal_state}")
+    print(f"#pp drill_translate {command} <{motion_mode}> <{drill_retract_mode}> {modal_state}")
 
     # you don't even have to check before calling
     HANDLED = {"G81", "G82", "G73", "G83"}
@@ -521,22 +518,21 @@ def drill_translate(
         raise CAMValueError("drill_translate for {command.toGCode()} requires R >= Z, saw R={retract_z} and Z={drill_z}")
 
     # FIXME: does it need to be separate Z motion? Does that imply it should be safe-height?
-    G0_retract_z = Path.Command("G0", {"Z" : retract_z.Value, "D":1})
+    G0_retract_z = Path.Command("G0", {"Z" : retract_z.Value})
 
     # preliminary movement(s)
 
     if motion_z < retract_z:
         translated.append( G0_retract_z )
-    translated.append( Path.Command("G0", {"X" : drill_x.Value, "Y" : drill_y.Value, "D":2}) )
+    translated.append( Path.Command("G0", {"X" : drill_x.Value, "Y" : drill_y.Value}) )
     if motion_z > retract_z:
         # NIST GCODE 3.5.16.1 Preliminary and In-Between Motion says G0 to retract_z
         # Here use G1 since retract height may be below surface !
-        translated.append( Path.Command("G1", {"Z" : retract_z.Value, "F" : feedrate.Value, "D":2.5}) )
+        translated.append( Path.Command("G1", {"Z" : retract_z.Value, "F" : feedrate.Value}) )
 
     # drill moves
 
     if command.Name in ("G81", "G82"):
-        translated.append( Path.Command("(81/82 sequence)") )
         translated.extend( output_G81_G82_drill_moves(
             command, 
             all_params,
@@ -545,7 +541,6 @@ def drill_translate(
         ))
 
     elif command.Name in ("G73", "G83"):
-        translated.append( Path.Command("(73/83 sequence)") )
         translated.extend( output_G73_G83_drill_moves(
             command,
             all_params,
@@ -613,7 +608,7 @@ def drill_translate_legacy( # FIXME: during development only, original code, DEB
         retract_z = motion_z
         print(f"  #leg g98 & >=.retract_z {retract_z}")
 
-    cmd = format_command_line(values, ["G0", f"Z{format_for_axis(values, retract_z)} D1"])
+    cmd = format_command_line(values, ["G0", f"Z{format_for_axis(values, retract_z)}"])
     G0_retract_z = f"{cmd}"
     # FIXME: e.g. should we be getting F from motion_location?
     cmd = format_for_feed(values, Units.Quantity(params.get("F", motion_location["Z"]), Units.Velocity))
@@ -628,7 +623,6 @@ def drill_translate_legacy( # FIXME: during development only, original code, DEB
             "G0",
             f"X{format_for_axis(values, drill_x)}",
             f"Y{format_for_axis(values, drill_y)}",
-            "D2",
         ],
     )
     gcode.append(f"{linenumber(values)}{cmd}")
@@ -636,17 +630,15 @@ def drill_translate_legacy( # FIXME: during development only, original code, DEB
         # NIST GCODE 3.5.16.1 Preliminary and In-Between Motion says G0 to retract_z
         # Here use G1 since retract height may be below surface !
         cmd = format_command_line(values, ["G1", f"Z{format_for_axis(values, retract_z)}"])
-        gcode.append(f"{linenumber(values)}{cmd}{F_feedrate} D2.5")
+        gcode.append(f"{linenumber(values)}{cmd}{F_feedrate}")
 
         # drill moves
     print(f"#leg before which===\n{gcode}\n===")
     if command in ("G81", "G82"):
-        gcode.append("(81/82 sequence)")
         output_G81_G82_drill_moves_str(
             values, gcode, command, params, drill_z, F_feedrate, G0_retract_z
         )
     elif command in ("G73", "G83"):
-        gcode.append("(73/83 sequence)")
         output_G73_G83_drill_moves_str(
             values, gcode, command, params, drill_z, retract_z, F_feedrate, G0_retract_z
         )
@@ -687,16 +679,19 @@ def drill_translate_gcode(
         if p == "F":
             return format_for_feed(values, Units.Quantity(value, Units.Velocity))
         else:
-            return format_for_axis(values, Units.Quantity(value, Units.Length))
+            return format_for_axis(values, Units.Quantity(value, Units.Length)) if value is not None else ''
 
     for command in translated:
         if command.Name.startswith("("):
             gcode.append( linenumber(values) + create_comment(values, command.Name[1:-1]) )
         else:
             # it's legacy, remember?
-            # FIXME: legacy did not use values["PARAMETER_ORDER"], should we?
-            param_part = " ".join([ f"{p}{format_parameter(p, v)}" for p,v in command.Parameters.items() ])
-            gcode.append( linenumber(values) + format_command_line(values, [ command.Name, param_part ]) )
+            param_part = " ".join([ f"{p}{format_parameter(p, command.Parameters[p])}" for p in Constants.PARAMETER_ORDER if p in command.Parameters ])
+            # format_command_line does a "".join on all parts, so an empt param_part would cause an extra " "
+            command_line = [ command.Name ]
+            if param_part != '':
+                command_line.append( param_part )
+            gcode.append( linenumber(values) + format_command_line(values, command_line) )
 
 def format_command_line(values: Values, command_line: CommandLine) -> str:
     """Construct the command line for the final output."""

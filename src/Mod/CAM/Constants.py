@@ -9,6 +9,9 @@ This module contains centralized constants used throughout the CAM workbench,
 including G-code commands, M-codes, and other standardized values.
 """
 
+# FIXME: added L even though it can only be 1 for certain drill codes
+PARAMETER_ORDER = ["X", "Y", "Z", "F", "I", "J", "K", "R", "Q", "P", "L"]
+
 # =============================================================================
 # G-Code Motion Commands
 # =============================================================================
