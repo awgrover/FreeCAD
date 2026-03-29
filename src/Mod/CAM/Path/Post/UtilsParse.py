@@ -427,7 +427,7 @@ def drill_translate(
 
     Harmless to call with a non-drill command, just returns [ command ],
     But, you probably want to only call this for your machine/post-processor's drill-codes
-        that need to be expanded.
+        that need it wants to be expanded.
     """
 
     print(f"#pp drill_translate {command} <{motion_mode}> {modal_state}")
