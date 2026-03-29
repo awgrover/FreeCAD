@@ -59,34 +59,34 @@ class TestDrillTranslate(PathTestBase):
 
     def test_arg_check(self):
         """...."""
-        gcode = Path.Command()
-        gcode.setFromGCode("G81 X10.0 Y10.0 R9.0 Z0 L2")
+        command = Path.Command()
+        command.setFromGCode("G81 X10.0 Y10.0 R9.0 Z0 L2")
 
         motion = "G90"
         modal_state = {}
         retract = "" # bad
 
         with self.assertRaises(CAMValueError) as cm:
-            result = drill_translate(gcode, motion, modal_state, retract)
+            result = drill_translate(command, motion, modal_state, retract)
         self.assertIn("expects a drill_retract_mode", str(cm.exception))
 
         retract = "G98"
         modal_state = {"F":100, "Z":0}
-        gcode.setFromGCode("G81 X10.0 Y10.0 R4.0 Z5")
+        command.setFromGCode("G81 X10.0 Y10.0 R4.0 Z5")
         with self.assertRaises(CAMValueError) as cm:
-            result = drill_translate(gcode, motion, modal_state, retract)
+            result = drill_translate(command, motion, modal_state, retract)
         self.assertIn("R >= Z", str(cm.exception))
 
     def test_drill_doesnt_translate(self):
         """just returns un-handled gcodes"""
-        gcode = Path.Command()
-        gcode.setFromGCode("G1 X10.0 Y10.0")
+        command = Path.Command()
+        command.setFromGCode("G1 X10.0 Y10.0")
 
         motion = "G90"
         modal_state = {}
         retract = "G98"
 
-        result = [x.toGCode() for x in drill_translate(gcode, motion, modal_state, retract)]
+        result = [x.toGCode() for x in drill_translate(command, motion, modal_state, retract)]
         lines = "\n".join(result)
 
         self.assertIn( "G1 X10", lines ) # enough to id the line
@@ -94,71 +94,193 @@ class TestDrillTranslate(PathTestBase):
 
     def test_to_absolute(self):
         """...."""
-        gcode = Path.Command()
-        gcode.setFromGCode("G81 X10.0 Y10.0 F100 R9.0 Z2")
+        command = Path.Command()
+        command.setFromGCode("G81 X10.0 Y10.0 F100 R9.0 Z2")
 
         motion = "G91" # relative
         modal_state = {"X":0,"Y":0,"Z":10}
         retract = "G98"
 
-        result = [x.toGCode() for x in drill_translate(gcode, motion, modal_state, retract)]
+        result = [x.toGCode() for x in drill_translate(command, motion, modal_state, retract)]
 
         self.assertIn( "G90", result ) # enough to id the line
         self.assertTrue( len(result) > 1, "Expected it to expand!" )
 
     def test_drill_translate81(self):
-        """...."""
-        gcode = Path.Command()
-        gcode.setFromGCode("G81 X10.0 Y10.0 Z0 F100 R9.0")
+        """Test code paths for G81, compare with previous string-mode drill_translate output"""
+        # try to excercise all code-paths
+        for motion in ["G90", "G91"]:
+            for retract in ["G98", "G99"]:
+                command = Path.Command()
+                command.setFromGCode("G81 X10.0 Y10.0 Z0 F100 R9.0")
 
-        motion = "G90"
-        modal_state = {"Z":20}
-        retract = "G98"
+                modal_state = {"Z":20} # needs Z for initial move
+                if motion == "G91":
+                    modal_state.update( {"X":0, "Y":0})
 
-        result = drill_translate(gcode, motion, modal_state, retract)
-        as_strings = [x.toGCode() for x in result]
-        lines = "\n".join(as_strings)
+                legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
+                print(f"##tup {legacy}")
+                eol="\n"
+                print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
 
-        # at least these
-        self.assertAtLeastPathCommandIn( Path.Command("G0", {"X":10}), result )
-        self.assertAtLeastPathCommandIn( Path.Command("G1", {"Z":0}), result )
-        self.assertNotIn( "G4 ", lines)
-        self.assertTrue( len(result) > 1, "Expected it to expand!" )
+                result = drill_translate(command, motion, modal_state, retract)
+                as_strings = [x.toGCode() for x in result]
+                lines = "\n".join(as_strings)
+
+                self.maxDiff = None
+                # Using toGCode() (string) to compare
+                self.assertEqual(
+                    lines,
+                    # FIXME: previous drill_translate did not reset G91!
+                    "\n".join([x.toGCode() for x in legacy]) + ("\nG91" if motion == "G91" else ""),
+                    f"For mode {motion}, retract {retract}"
+                )
 
     def test_drill_translate82(self):
-        """...."""
-        gcode = Path.Command()
-        gcode.setFromGCode("G82 X10.0 Y10.0 Z0 F100 R9.0 P4")
+        """Test code paths for G82, compare with previous string-mode drill_translate output"""
+        for motion in ["G90", "G91"]:
+            for retract in ["G98", "G99"]:
+                print(f"#tup G82 mode {motion}, retract {retract}" )
 
-        motion = "G90"
-        modal_state = {"Z":20}
-        retract = "G98"
+                command = Path.Command()
+                command.setFromGCode("G82 X10.0 Y10.0 Z0 F100 R9.0 P4")
 
-        result = drill_translate(gcode, motion, modal_state, retract)
-        as_strings = [x.toGCode() for x in result]
-        lines = "\n".join(as_strings)
+                modal_state = {"Z":20} # needs Z for initial move
+                if motion == "G91":
+                    modal_state.update( {"X":0, "Y":0})
 
-        # at least these
-        self.assertAtLeastPathCommandIn( Path.Command("G0", {"X":10}), result )
-        self.assertAtLeastPathCommandIn( Path.Command("G1", {"Z":0}), result )
-        self.assertAtLeastPathCommandIn( Path.Command("G4",{"P":4}), result )
+                legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
+                print(f"##tup {legacy}")
+                eol="\n"
+                print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
+
+                result = drill_translate(command, motion, modal_state, retract)
+                as_strings = [x.toGCode() for x in result]
+                lines = "\n".join(as_strings)
+
+                self.maxDiff = None
+                self.assertEqual(
+                    lines,
+                    # FIXME: previous drill_translate did not reset G91!
+                    "\n".join([x.toGCode() for x in legacy]) + ("\nG91" if motion == "G91" else ""),
+                    f"For mode {motion}, retract {retract}"
+                )
+
+    def legacy_drill_translate(self, command, motion_mode="G90", retract="G98", modal_state={}, chipbreaking_amount=None):
+        # for comparison during development: DEBUG
+        # returns [ Path.Commands ]
+
+        from Path.Post.UtilsParse import drill_translate_gcode
+
+        def gtop(gcode_str):
+            p = Path.Command()
+            p.setFromGCode(gcode_str)
+            return p
+
+        mock_values = {
+            "MOTION_MODE": motion_mode,
+            "COMMAND_SPACE": " ",
+            "UNIT_FORMAT": "mm",
+            "UNIT_SPEED_FORMAT": "mm/s",
+            "AXIS_PRECISION": 3,
+            "FEED_PRECISION": 3,
+            "OUTPUT_LINE_NUMBERS": False,
+            "CHIPBREAKING_AMOUNT" : chipbreaking_amount,
+        }
+        mock_modal_state = {  # self._modal_state, # FIXME: not being tracked
+            "Z": 0,
+            "X": 0,
+            "Y": 0,
+            "Z": 0,
+            "F": 1000,
+        }
+        mock_modal_state.update( modal_state )
+
+        params = command.Parameters
+
+        gcode_str_list = []
+        print(f"#t call legacy w/ command {command} -> {command.Name} {command.Parameters}")
+        drill_translate_gcode(
+            mock_values,
+            gcode_str_list,
+            command.Name,
+            params,
+            motion_location = mock_modal_state,
+            drill_retract_mode = retract,
+        )
+        commands = [gtop(g) for g in gcode_str_list]
+        return commands
 
     def test_drill_translate83(self):
-        """...."""
-        gcode = Path.Command()
-        gcode.setFromGCode("G83 X10.0 Y10.0 Z0 F100 R9.0 Q4")
+        """Test code paths for G83, compare with previous string-mode drill_translate output"""
+        # try to excercise all code-paths
+        for motion in ["G90", "G91"]:
+            for retract in ["G98", "G99"]:
+                print(f"#tup G83 mode {motion}, retract {retract}" )
+                command = Path.Command()
+                command.setFromGCode("G83 X10.0 Y10.0 Z0 F100 R9.0 Q4")
 
-        motion = "G90"
-        modal_state = {"Z":20}
-        retract = "G98"
+                modal_state = {"Z":20} # needs Z for initial move
+                if motion == "G91":
+                    modal_state.update( {"X":0, "Y":0})
 
-        result = drill_translate(gcode, motion, modal_state, retract)
-        as_strings = [x.toGCode() for x in result]
-        lines = "\n".join(as_strings)
+                legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
+                print(f"##tup {legacy}")
+                eol="\n"
+                print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
 
-        # at least these
-        self.assertAtLeastPathCommandIn( Path.Command("G0", {"X":10}), result )
-        self.assertAtLeastPathCommandIn( Path.Command("G1", {"Z":0}), result )
+                result = drill_translate(command, motion, modal_state, retract)
+                as_strings = [x.toGCode() for x in result]
+                lines = "\n".join(as_strings)
+
+                self.maxDiff = None
+                # FIXME: Path.Command doesn't implement .__eq__? I got failures when the .Name and .Parameters where the same
+                # Using toGCode() (string) to compare
+                self.assertEqual( 
+                    lines, 
+                    # FIXME: previous drill_translate did not reset G91!
+                    "\n".join([x.toGCode() for x in legacy]) + ("\nG91" if motion == "G91" else ""), 
+                    f"For mode {motion}, retract {retract}" 
+                )
+
+    def test_drill_translate73(self):
+        """Test code paths for G73, compare with previous string-mode drill_translate output"""
+        # try to excercise all code-paths
+        for motion in ["G90", "G91"]:
+            for retract in ["G98", "G99"]:
+                print(f"#tup G83 mode {motion}, retract {retract}" )
+                command = Path.Command()
+                command.setFromGCode("G73 X10.0 Y10.0 Z0 F100 R9.0 Q4")
+
+                chipbreaking_amount = FreeCAD.Units.Quantity(2.0, FreeCAD.Units.Length) # mm
+                modal_state = {"Z":20} # needs Z for initial move
+                if motion == "G91":
+                    modal_state.update( {"X":0, "Y":0})
+
+                legacy = self.legacy_drill_translate( 
+                    command, 
+                    modal_state=modal_state, 
+                    retract=retract, 
+                    motion_mode=motion,
+                    chipbreaking_amount=chipbreaking_amount
+                )
+                print(f"##tup {legacy}")
+                eol="\n"
+                print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
+
+                result = drill_translate(command, motion, modal_state, retract, chipbreaking_amount=chipbreaking_amount)
+                as_strings = [x.toGCode() for x in result]
+                lines = "\n".join(as_strings)
+
+                self.maxDiff = None
+                # FIXME: Path.Command doesn't implement .__eq__? I got failures when the .Name and .Parameters where the same
+                # Using toGCode() (string) to compare
+                self.assertEqual( 
+                    lines, 
+                    # FIXME: previous drill_translate did not reset G91!
+                    "\n".join([x.toGCode() for x in legacy]) + ("\nG91" if motion == "G91" else ""), 
+                    f"For mode {motion}, retract {retract}" 
+                )
 
     @unittest.expectedFailure
     def test_todo(self):
