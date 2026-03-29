@@ -96,7 +96,7 @@ def check_for_drill_translate(
         # wrap this block to ensure that the value of values["MOTION_MODE"]
         # is restored in case of error
         try:
-            drill_translate(
+            drill_translate_gcode(
                 values,
                 gcode,
                 command,
