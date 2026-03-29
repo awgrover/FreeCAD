@@ -641,3 +641,6 @@ class TestLinuxCNCPost(PathTestUtils.PathTestBase):
 
         # At least one G4 for the G81 Q
         self.assertIn("G4 ", gcode)
+
+        # TODO: like TestPostOutput.py tests, do all the code paths
+        # TODO: and, test for all parameters modal

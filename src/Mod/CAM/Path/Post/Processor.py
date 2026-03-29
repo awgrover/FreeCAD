@@ -945,11 +945,8 @@ class PostProcessor:
         return gcodeheader
 
     def _expand_canned_cycles(self, postables):
-        """Terminate canned drill cycles in postable paths.
-
-        Adds cycle termination commands (G80) after canned cycle sequences.
-        Drill cycle translation is handled separately by the postprocessor
-        via the drill_cycles_to_translate property.
+        """Translates drill codes if `drill_cycles_to_translate`,
+        else terminates canned drill cycles in postable paths.
 
         Subclasses can override to customize canned cycle handling.
         """
@@ -963,6 +960,7 @@ class PostProcessor:
             )
 
         def add_cannedCycleTerminator(item):
+            # FIXME: combine with loop below for single pass: if any, and not translated, then add
             drill_commands = (
                 Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
                 + [
@@ -976,22 +974,11 @@ class PostProcessor:
             if has_drill_cycles:
                 item.Path = PostUtils.cannedCycleTerminator(item.Path)
 
-        # FIXME: HACK
         def replace_drill_cycles(item):
+            """Translate actual Path.Command's"""
             print(f"#== replace ?: {item.Path.Commands}")
             translated = []
 
-            mock_values = {
-                "MOTION_MODE": "G90",
-                "COMMAND_SPACE": " ",
-                "UNIT_FORMAT": "mm",
-                "UNIT_SPEED_FORMAT": "mm/s",
-                "AXIS_PRECISION": 3,
-                "FEED_PRECISION": 3,
-                "OUTPUT_LINE_NUMBERS": False,
-                "CHIPBREAKING_AMOUNT" : FreeCAD.Units.Quantity("10.0 mm"), # FIXME: in internal units (mm), value from where...
-                "COMMENT_SYMBOL": "(",
-            }
             mock_modal_state = {  # self._modal_state, # FIXME: not being tracked
                 "Z": 0,
                 "X": 0,
@@ -1000,33 +987,25 @@ class PostProcessor:
                 "F": 1000,
             }
 
-            def gtop(gcode_str):
-                p = Path.Command()
-                p.setFromGCode(gcode_str)
-                return p
-
             for command in item.Path.Commands:
                 if command.Name in to_translate:
-                    gcode_str_list = []
                     # requires XYZ parameters
                     print(f"# drill modal state {self._modal_state}")
-                    # FIXME: doesn't work in hack
-                    params = self._modal_state.copy()
-                    params.update( command.Parameters )
-                    # HACK
-                    params = { k:v for k,v in params.items() if v is not None }
 
+                    chipbreaking_amount = self.values.get("CHIPBREAKING_AMOUNT", None)
                     print(f"modal_state {mock_modal_state}")
-                    drill_translate_gcode(
-                        mock_values,
-                        gcode_str_list,
-                        command.Name,
-                        params,
-                        motion_location = mock_modal_state,
-                        drill_retract_mode = "G98",  # drill_retract_mode FIXME
+                    drill_translated = drill_translate(
+                        command,
+                        motion_mode = "G90", # FIXME: get from modal-state when we track it
+                        modal_state = mock_modal_state, # FIXME
+                        drill_retract_mode = "G98",  # FIXME
+                        chipbreaking_amount = (
+                            FreeCAD.Units.Quantity(chipbreaking_amount, FreeCAD.Units.Length)
+                            if chipbreaking_amount is not None
+                            else None
+                        ),
                     )
-                    print(f"#== replace raw  : {gcode_str_list}")
-                    translated.extend([gtop(g) for g in gcode_str_list])
+                    translated.extend( drill_translated )
                     print(f"#== replace expand  : {translated}")
                 else:
                     translated.append(command)
@@ -1034,9 +1013,9 @@ class PostProcessor:
             item.Path = Path.Path(translated)
             print(f"#== replace rez  : {item.Path.Commands}")
 
+        # Go through postables
         for section_name, sublist in postables:
             for item in sublist:
-                has_drill_cycles = False
                 if item.Path:
                     if to_translate:
                         replace_drill_cycles(item)

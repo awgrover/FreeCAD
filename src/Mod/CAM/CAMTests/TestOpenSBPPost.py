@@ -529,22 +529,18 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         # basic stuff, + something that is shopbot specific
         # FIXME: all Test*Post should do this
         # FIXME: a test-util function for gcode-name to arbitrary-good-gcode, to generate this list from Constants, etc
-        handled_gcode = [
-            (Path.Command(), gstr)
-            for gstr in (
-                "G0X1Y2Z3 G1X4Y5Z6 G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
+        handled_gcode = [ Path.Command(g) for g in
+                # trying to list all handled gcodes, is checked below against opensbp list
+                ("G0X1Y2Z3 G1X4Y5Z6 G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
                 "G20 G21 G38.2X1Y2Z3 G54 G90 G91 G92X4Y5Z6 "
                 # The drill params don't necessarily make sense in these, we just need certain params:
                 "G73Z7R91Q1 G74Z11R12 G80 G81Z9R10 G82Z10R11P12 G83Z11R12Q2 G84Z12R13 G85Z1R2 G88Z30R31 G89Z3R4 "
                 "M0 M1 M3S1 M5 M6T2 M7 M8 M9 "
                 "(comment)"
-            ).split(" ")
+                ).split(" ")
         ]
-        self.profile_op.Path = Path.Path(
-            # now, try to list all handled gcodes
-            # FIXME: can we have a Path.Command(gstring)?
-            [p.setFromGCode(gstr) or p for p, gstr in handled_gcode],
-        )
+
+        self.profile_op.Path = Path.Path( handled_gcode )
         self.post.export2()
         self.assertTrue(True, "No Crash")
 
@@ -554,7 +550,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             self.post.GCodeSupported - self.post.GCodeUnsupported
         )
         untried = set([p for p in all_supported if not re.search(r"0\d$", p)]) - set(
-            [p.Name for p, gstr in handled_gcode]
+            [p.Name for p in handled_gcode]
         )
         self.assertEqual(
             set(), untried, f"Untried but opensbp_post supported, add to list: {sorted(untried)}"
@@ -570,7 +566,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             - self.post.GCodeUnsupported
         )
         untried = set([p for p in all_possible if not re.search(r"0\d$", p)]) - set(
-            [p.Name for p, gstr in handled_gcode]
+            [p.Name for p in handled_gcode]
         )
         self.assertEqual(
             set(),

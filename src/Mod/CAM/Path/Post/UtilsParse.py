@@ -416,6 +416,9 @@ def drill_translate(
     chipbreaking_amount : Units.Quantity|None = None # required for G73
 ) -> [ Path.Command ]:
     """Translate a drill g-code Path.Command to a list of Path.Commands
+
+    (Are you looking for the string-gcode method? its drill_translate_gcode() below)
+
     Assumes the internal units: mm and mm/sec etc.
 
     Currently only cycles in XY are provided (G17).
@@ -814,7 +817,7 @@ def output_G73_G83_drill_moves(
         print(f"#pp g83 done if next_stop_z ({next_stop_z}) <= drill_z {drill_z}")
         if next_stop_z > drill_z:
             print(f"#pp   g83 g1 down to {next_stop_z}")
-            translated.append( Path.Command("G1", {"Z": next_stop_z.Value, "F": command.Parameters["F"]}) )
+            translated.append( Path.Command("G1", {"Z": next_stop_z.Value, "F": params["F"]}) )
             print(f"#pp     translated {translated}")
             if command.Name == "G73":
                 # Rapid up "a small amount".
@@ -826,7 +829,7 @@ def output_G73_G83_drill_moves(
                 translated.append( G0_retract_z )
             last_stop_z = next_stop_z
         else:
-            translated.append( Path.Command("G1", {"Z": drill_z, "F": command.Parameters["F"]}) )
+            translated.append( Path.Command("G1", {"Z": drill_z, "F": params["F"]}) )
             translated.append( G0_retract_z )
             break
 
