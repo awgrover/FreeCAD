@@ -25,7 +25,7 @@ import unittest
 
 import FreeCAD
 import Path
-from Path.Post.UtilsParse import drill_translate 
+from Path.Post.UtilsParse import drill_translate, drill_translate_gcode
 from Path.Post.UtilsParse import CAMParameterRequiredError, CAMValueError
 
 from CAMTests.PathTestUtils import PathTestBase
@@ -118,7 +118,7 @@ class TestDrillTranslate(PathTestBase):
                 if motion == "G91":
                     modal_state.update( {"X":0, "Y":0})
 
-                legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
+                gcode_style, legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
                 print(f"##tup {legacy}")
                 eol="\n"
                 print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
@@ -149,7 +149,7 @@ class TestDrillTranslate(PathTestBase):
                 if motion == "G91":
                     modal_state.update( {"X":0, "Y":0})
 
-                legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
+                gcode_style, legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
                 print(f"##tup {legacy}")
                 eol="\n"
                 print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
@@ -170,7 +170,7 @@ class TestDrillTranslate(PathTestBase):
         # for comparison during development: DEBUG
         # returns [ Path.Commands ]
 
-        from Path.Post.UtilsParse import drill_translate_gcode
+        from Path.Post.UtilsParse import drill_translate_legacy
 
         def gtop(gcode_str):
             p = Path.Command()
@@ -185,6 +185,7 @@ class TestDrillTranslate(PathTestBase):
             "AXIS_PRECISION": 3,
             "FEED_PRECISION": 3,
             "OUTPUT_LINE_NUMBERS": False,
+            "COMMENT_SYMBOL" : "(",
             "CHIPBREAKING_AMOUNT" : chipbreaking_amount,
         }
         mock_modal_state = {  # self._modal_state, # FIXME: not being tracked
@@ -199,7 +200,7 @@ class TestDrillTranslate(PathTestBase):
         params = command.Parameters
 
         gcode_str_list = []
-        print(f"#t call legacy w/ command {command} -> {command.Name} {command.Parameters}")
+        print(f"#t call str style w/ command {command} -> {command.Name} {command.Parameters}")
         drill_translate_gcode(
             mock_values,
             gcode_str_list,
@@ -208,8 +209,23 @@ class TestDrillTranslate(PathTestBase):
             motion_location = mock_modal_state,
             drill_retract_mode = retract,
         )
-        commands = [gtop(g) for g in gcode_str_list]
-        return commands
+        commands_str = [gtop(g) for g in gcode_str_list]
+
+        gcode_str_list = []
+        print(f"#t call legacy w/ command {command} -> {command.Name} {command.Parameters}")
+        drill_translate_legacy(
+            mock_values,
+            gcode_str_list,
+            command.Name,
+            params,
+            motion_location = mock_modal_state,
+            drill_retract_mode = retract,
+        )
+        commands_legacy = [gtop(g) for g in gcode_str_list]
+
+        return commands_str, commands_legacy
+
+        return commands_str, commands_legacy
 
     def test_drill_translate83(self):
         """Test code paths for G83, compare with previous string-mode drill_translate output"""
@@ -224,7 +240,7 @@ class TestDrillTranslate(PathTestBase):
                 if motion == "G91":
                     modal_state.update( {"X":0, "Y":0})
 
-                legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
+                gcode_style, legacy = self.legacy_drill_translate( command, modal_state=modal_state, retract=retract, motion_mode=motion )
                 print(f"##tup {legacy}")
                 eol="\n"
                 print(f"##tup legacy===\n{eol.join([x.toGCode() for x in legacy]) }\n===")
@@ -240,8 +256,16 @@ class TestDrillTranslate(PathTestBase):
                     lines, 
                     # FIXME: previous drill_translate did not reset G91!
                     "\n".join([x.toGCode() for x in legacy]) + ("\nG91" if motion == "G91" else ""), 
-                    f"For mode {motion}, retract {retract}" 
+                    f"For legacy, mode {motion}, retract {retract}" 
                 )
+
+                # We also check that the string-gcode version gives the same result
+                self.assertEqual( 
+                    lines, 
+                    "\n".join([x.toGCode() for x in gcode_style]),
+                    f"For _gcode, mode {motion}, retract {retract}" 
+                )
+
 
     def test_drill_translate73(self):
         """Test code paths for G73, compare with previous string-mode drill_translate output"""
@@ -257,7 +281,7 @@ class TestDrillTranslate(PathTestBase):
                 if motion == "G91":
                     modal_state.update( {"X":0, "Y":0})
 
-                legacy = self.legacy_drill_translate( 
+                gcode_style, legacy = self.legacy_drill_translate( 
                     command, 
                     modal_state=modal_state, 
                     retract=retract, 
@@ -285,6 +309,6 @@ class TestDrillTranslate(PathTestBase):
     @unittest.expectedFailure
     def test_todo(self):
         assertTrue(False, "todo")
-        # test retract g98 (z) vs g99 (r)
+        # test with linenumbers on esp. vs _gcode vs _legacy
         # eh? some kind of clipping: if drill_retract_mode == "G98" and motion_z >= retract_z: retract_z = motion_z
 

@@ -425,15 +425,22 @@ def drill_translate(
     XZ (G18) and YZ (G19) are not dealt with.
     In other words only Z drilling can be translated.
 
-    NB: the result is Absolute mode (G90). Make sure used in that context
+    Harmless to call with a non-drill command, just returns [ command ],
+    But, you probably want to only call this for your machine/post-processor's drill-codes
+        that need to be expanded.
     """
 
     print(f"#pp drill_translate {command} <{motion_mode}> {modal_state}")
 
     # you don't even have to check before calling
     HANDLED = {"G81", "G82", "G73", "G83"}
+    # FIXME: no good way to move G85 up to `unsupported`: export2() should override supported and remove this
+    NOT_HANDLED = {"G85"} # FIXME: it's in Constants, but no code to translate it. Is it the same as one of the others? Should it be removed from Constants?
     if command.Name not in HANDLED:
         return [ command ]
+    if command.Name in NOT_HANDLED:
+        # we just don't have code for this yet
+        raise CAMValueError(f"drill_translate can not translate the drill code {command}")
 
     if drill_retract_mode not in [ "G98", "G99" ]:
         raise CAMValueError(f"drill_translate, for {command}, expects a drill_retract_mode of G98 or G99, saw {drill_retract_mode.__class__.__name__}: {drill_retract_mode}")
@@ -553,7 +560,7 @@ def drill_translate(
     print(f"#pp result:---\n{ eol.join([x.toGCode() for x in translated]) }\n---")
     return translated
 
-def drill_translate_gcode(
+def drill_translate_legacy( # FIXME: during development only, original code, DEBUG
     values: Values,
     gcode: Gcode,
     command: str,
@@ -644,6 +651,52 @@ def drill_translate_gcode(
             values, gcode, command, params, drill_z, retract_z, F_feedrate, G0_retract_z
         )
 
+
+def drill_translate_gcode(
+    values: Values,
+    gcode: Gcode,
+    command: str,
+    params: PathParameters,
+    motion_location: PathParameters,
+    drill_retract_mode: str,
+) -> None:
+    """Compatibility method:
+    Translate drill cycles for a STRING g-code and dict of params.
+
+    Use .drill_translate() for a Path.Command
+
+    Currently only cycles in XY are provided (G17).
+    XZ (G18) and YZ (G19) are not dealt with.
+    In other words only Z drilling can be translated.
+
+    Result is in `gcode` as a list of gcodes
+    """
+
+    translated : [ Path.Command ]
+
+    # FIXME: note the behavior is now changed: we throw on bad/missing values
+    translated = drill_translate(
+        Path.Command( command, params ),
+        motion_mode = values["MOTION_MODE"],
+        modal_state = motion_location,
+        drill_retract_mode = drill_retract_mode,
+        chipbreaking_amount = values.get("CHIPBREAKING_AMOUNT", None)
+    )
+
+    def format_parameter(p, value):
+        if p == "F":
+            return format_for_feed(values, Units.Quantity(value, Units.Velocity))
+        else:
+            return format_for_axis(values, Units.Quantity(value, Units.Length))
+
+    for command in translated:
+        if command.Name.startswith("("):
+            gcode.append( linenumber(values) + create_comment(values, command.Name[1:-1]) )
+        else:
+            # it's legacy, remember?
+            # FIXME: legacy did not use values["PARAMETER_ORDER"], should we?
+            param_part = " ".join([ f"{p}{format_parameter(p, v)}" for p,v in command.Parameters.items() ])
+            gcode.append( linenumber(values) + format_command_line(values, [ command.Name, param_part ]) )
 
 def format_command_line(values: Values, command_line: CommandLine) -> str:
     """Construct the command line for the final output."""
