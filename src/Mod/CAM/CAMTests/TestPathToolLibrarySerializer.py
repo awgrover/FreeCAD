@@ -152,7 +152,7 @@ class TestLinuxCNCLibrarySerializer(TestPathToolLibrarySerializerBase):
 
         def format_D(v):
             # Convert and format to userPreferred
-            # It is important to get the units for userPreferred from the actual `v`, 
+            # It is important to get the units for userPreferred from the actual `v`,
             # because the units are dependant on the order-of-magnitude of v
             # for some user-preference unit-systems.
             # E.g. U.S. Customary will give `thous` for 1mm, `"` (inch) for 6mm, etc.
@@ -168,9 +168,15 @@ class TestLinuxCNCLibrarySerializer(TestPathToolLibrarySerializerBase):
         # D values from setUp()
         # TODO: this will fail when Tool/library/serializers/linuxcnc.py serialize() uses MBPP, as noted in its TODO
         # and the test will have to use MBPP in place of the userPreferred stuff above
-        self.assertEqual(lines[0], f"T1 P0 X0 Y0 Z0 A0 B0 C0 U0 V0 W0 D{format_D('6mm')} I0 J0 Q0 ;Endmill 6mm")
-        self.assertEqual(lines[1], f"T2 P0 X0 Y0 Z0 A0 B0 C0 U0 V0 W0 D{format_D('3mm')} I0 J0 Q0 ;Endmill 3mm")
-        self.assertEqual(lines[2], f"T3 P0 X0 Y0 Z0 A0 B0 C0 U0 V0 W0 D{format_D('5mm')} I0 J0 Q0 ;Ballend 5mm")
+        self.assertEqual(
+            lines[0], f"T1 P0 X0 Y0 Z0 A0 B0 C0 U0 V0 W0 D{format_D('6mm')} I0 J0 Q0 ;Endmill 6mm"
+        )
+        self.assertEqual(
+            lines[1], f"T2 P0 X0 Y0 Z0 A0 B0 C0 U0 V0 W0 D{format_D('3mm')} I0 J0 Q0 ;Endmill 3mm"
+        )
+        self.assertEqual(
+            lines[2], f"T3 P0 X0 Y0 Z0 A0 B0 C0 U0 V0 W0 D{format_D('5mm')} I0 J0 Q0 ;Ballend 5mm"
+        )
 
     def test_linuxcnc_deserialize_not_implemented(self):
         serializer = LinuxCNCSerializer
