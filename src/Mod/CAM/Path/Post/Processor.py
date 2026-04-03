@@ -958,10 +958,11 @@ class PostProcessor:
         def add_cannedCycleTerminator(item):
             # FIXME: combine with loop below for single pass: if any, and not translated, then add
             drill_commands = (
-                Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
+                Constants.GCODE_DRILL_EXTENDED
+                + Constants.GCODE_MOVE_DRILL
                 + [
-                "G86",  # FIXME: not in Constants
-                "G87",  # FIXME: not in Constants
+                    "G86",  # FIXME: not in Constants
+                    "G87",  # FIXME: not in Constants
                 ]
             )
 
@@ -983,29 +984,31 @@ class PostProcessor:
             }
 
             # only used by G73
-            if "CHIPBREAKING_AMOUNT" in self.values: # FIXME: add to Machine, Units.Quantity
+            if "CHIPBREAKING_AMOUNT" in self.values:  # FIXME: add to Machine, Units.Quantity
                 v_chipbreak = self.values["CHIPBREAKING_AMOUNT"]
                 # pre-MBPP (args --chipbreaking_amount) can be string values e.g. "0.02 mm"
                 if isinstance(v_chipbreak, FreeCAD.Units.Quantity):
                     chipbreaking_amount = v_chipbreak.Value
                 else:
-                    chipbreaking_amount = FreeCAD.Units.Quantity( v_chipbreak, Length).Value
+                    chipbreaking_amount = FreeCAD.Units.Quantity(v_chipbreak, Length).Value
             else:
                 chipbreaking_amount = None
 
             expander = DrillCycleExpander(
-                        initial_position = mock_modal_state.copy(), # HACK: get from modal-state when we track it. next PR
-                        retract_mode = "G98",  # HACK: get from modal-state when we track it. next PR
-                        chipbreaking_amount = chipbreaking_amount
+                initial_position=mock_modal_state.copy(),  # HACK: get from modal-state when we track it. next PR
+                retract_mode="G98",  # HACK: get from modal-state when we track it. next PR
+                chipbreaking_amount=chipbreaking_amount,
             )
 
             for command in item.Path.Commands:
                 if command.Name in to_translate:
-                    drill_translated = expander.expand_command( command )
+                    drill_translated = expander.expand_command(command)
                     if drill_translated == []:
-                        raise Exception(f"Unknown error in {command}") # FIXME: we need more info for a useful user error.
+                        raise Exception(
+                            f"Unknown error in {command}"
+                        )  # FIXME: we need more info for a useful user error.
 
-                    translated.extend( drill_translated )
+                    translated.extend(drill_translated)
                     print(f"#== replace expand  : {translated}")
                 else:
                     translated.append(command)
@@ -2049,7 +2052,7 @@ class PostProcessor:
                 else f"<NO _machine in {self.__class__.__name__}>"
             )
 
-        if not command.Name: # DEBUG
+        if not command.Name:  # DEBUG
             raise Exception("No command.Name")
 
         # Validate command is supported
@@ -2064,10 +2067,7 @@ class PostProcessor:
             )
 
         print(f"## supported {sorted(supported)}")
-        if (
-            command.Name not in supported
-            and not command.Name.startswith("(")
-        ):
+        if command.Name not in supported and not command.Name.startswith("("):
             un = sorted(
                 getattr(self._machine, "properties", {}).get("supported_commands", "").split("\n")
             )
@@ -2256,7 +2256,7 @@ class PostProcessor:
             print(f"### feed {feed_value}")
 
             # There are actually oddball controls that use {units}/second feedrate.
-            if not ( self._machine and hasattr(self._machine, "feedrate_per_second") ):
+            if not (self._machine and hasattr(self._machine, "feedrate_per_second")):
                 # Convert from mm/sec to mm/min (multiply by 60)
                 feed_value = feed_value * 60.0
 
@@ -2331,9 +2331,7 @@ class PostProcessor:
         command_line.append(command_name)
 
         # Format parameters with clean, stateless implementation
-        parameter_order = self.values.get(
-            "PARAMETER_ORDER", Constants.PARAMETER_ORDER
-        )
+        parameter_order = self.values.get("PARAMETER_ORDER", Constants.PARAMETER_ORDER)
 
         for parameter in parameter_order:
             if parameter in params:

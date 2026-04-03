@@ -31,7 +31,6 @@ from typing import List, Optional
 import Path
 from Constants import GCODE_EXPANDABLE_DRILL
 
-
 debug = True
 if debug:
     Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
@@ -50,7 +49,7 @@ class DrillCycleExpander:
         self,
         retract_mode: str = "G98",
         initial_position: Optional[dict] = None,
-        chipbreaking_amount : None|float = None, # only G73, default 5%, a distance
+        chipbreaking_amount: None | float = None,  # only G73, default 5%, a distance
     ):
         """
         Initialize the expander.
@@ -124,18 +123,30 @@ class DrillCycleExpander:
         cmd_name = command.Name.upper()
 
         # Required parameters
-        missing_axis = [ a for a in "XYZ" if a not in command.Parameters or command.Parameters[a] is None ]
+        missing_axis = [
+            a for a in "XYZ" if a not in command.Parameters or command.Parameters[a] is None
+        ]
         if missing_axis:
             # should be an internal error only
-            raise Exception(f"Drill-cycle-expand requires X,Y & Z axis: {command} saw {missing_axis}")
-        missing_param = [ p for p in "RF" if p not in command.Parameters or command.Parameters[p] is None ]
-        if command.Name in ["G83","G73"] and ('Q' not in command.Parameters or command.Parameters["Q"] is None):
-            missing_param.append('Q')
-        if command.Name in ["G82"] and ('P' not in command.Parameters or command.Parameters["P"] is None):
-            missing_param.append('P')
+            raise Exception(
+                f"Drill-cycle-expand requires X,Y & Z axis: {command} saw {missing_axis}"
+            )
+        missing_param = [
+            p for p in "RF" if p not in command.Parameters or command.Parameters[p] is None
+        ]
+        if command.Name in ["G83", "G73"] and (
+            "Q" not in command.Parameters or command.Parameters["Q"] is None
+        ):
+            missing_param.append("Q")
+        if command.Name in ["G82"] and (
+            "P" not in command.Parameters or command.Parameters["P"] is None
+        ):
+            missing_param.append("P")
         if missing_param:
             # should be an internal error only
-            raise Exception(f"Drill-cycle-expand requires {' & '.join(missing_param)} parameter: {command}")
+            raise Exception(
+                f"Drill-cycle-expand requires {' & '.join(missing_param)} parameter: {command}"
+            )
 
         # DEBUG to be removed in next PR
         def bad(param, *which_commands):
@@ -143,7 +154,8 @@ class DrillCycleExpander:
                 return param
             else:
                 return None
-        if b:=(bad('Q', "G81","G82") or bad('P', "G73","G81","G83")):
+
+        if b := (bad("Q", "G81", "G82") or bad("P", "G73", "G81", "G83")):
             raise Exception(f"Unexpected param {b} for {command}")
 
         # Extract parameters
@@ -187,7 +199,9 @@ class DrillCycleExpander:
             self.current_position["Z"] = retract_z
 
         # Move to XY position at current Z height (which should be R)
-        if drill_x != self.current_position.get("X", None) or drill_y != self.current_position.get("Y", None):
+        if drill_x != self.current_position.get("X", None) or drill_y != self.current_position.get(
+            "Y", None
+        ):
             expanded.append(
                 Path.Command("G0", {"X": drill_x, "Y": drill_y, "Z": self.current_position["Z"]})
             )
@@ -210,9 +224,7 @@ class DrillCycleExpander:
 
         # Perform the drilling operation
         if cmd_name in ("G81", "G82"):
-            expanded.extend(
-                self._expand_g81_g82(command, drill_z, final_retract, feedrate)
-            )
+            expanded.extend(self._expand_g81_g82(command, drill_z, final_retract, feedrate))
         elif cmd_name in ("G73", "G83"):
             expanded.extend(
                 self._expand_g73_g83(command, drill_z, retract_z, final_retract, feedrate)
@@ -222,7 +234,7 @@ class DrillCycleExpander:
 
     def _expand_g81_g82(
         self,
-        command : Path.Command,
+        command: Path.Command,
         drill_z: float,
         final_retract: float,
         feedrate: Optional[float],
@@ -265,7 +277,7 @@ class DrillCycleExpander:
 
     def _expand_g73_g83(
         self,
-        command : Path.Command,
+        command: Path.Command,
         drill_z: float,
         retract_z: float,
         final_retract: float,
@@ -277,10 +289,14 @@ class DrillCycleExpander:
         cmd_name = command.Name
         params = command.Parameters
 
-        peck_depth = params.get("Q", abs(drill_z - retract_z)) # G81/G82 have no Q
+        peck_depth = params.get("Q", abs(drill_z - retract_z))  # G81/G82 have no Q
         current_depth = retract_z
         # for G73, Explicit or Small clearance amount
-        clearance = (current_depth + self.chipbreaking_amount) if self.chipbreaking_amount is not None else (peck_depth * 0.05)
+        clearance = (
+            (current_depth + self.chipbreaking_amount)
+            if self.chipbreaking_amount is not None
+            else (peck_depth * 0.05)
+        )
 
         while current_depth > drill_z:
             # Calculate next peck depth
@@ -313,7 +329,7 @@ class DrillCycleExpander:
 
             # Retract based on cycle type
             if cmd_name == "G73":
-                if next_depth == drill_z: # FIXME: should be covered by final retract after if/else
+                if next_depth == drill_z:  # FIXME: should be covered by final retract after if/else
                     # Final peck - retract to R
                     expanded.append(
                         Path.Command(

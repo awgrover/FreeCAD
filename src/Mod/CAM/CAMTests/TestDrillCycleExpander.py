@@ -85,7 +85,7 @@ class TestDrillCycleExpander(unittest.TestCase):
         )
 
         commands = [
-            Path.Command("G0 X5 Y10 Z15" ),
+            Path.Command("G0 X5 Y10 Z15"),
             Path.Command("G81 X2 Y2.1 Z-5.0 R2.0 F100.0"),
         ]
 
@@ -247,10 +247,10 @@ class TestDrillCycleExpander(unittest.TestCase):
             Path.Command("G0", {"Z": 1.0}),
             Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": 1.0}),  # XY move at current Z
             Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": 0.1}),  # Z to R position
-            Path.Command("G1", {"X": 1.0, "Y": 1.0, "Z": -0.1, "F": 10.0}), # drill
-            Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": 0.1}), # retract
-            Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": -0.09}), # back to bottom
-            Path.Command("G1", {"X": 1.0, "Y": 1.0, "Z": -0.3, "F": 10.0}), # drill...
+            Path.Command("G1", {"X": 1.0, "Y": 1.0, "Z": -0.1, "F": 10.0}),  # drill
+            Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": 0.1}),  # retract
+            Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": -0.09}),  # back to bottom
+            Path.Command("G1", {"X": 1.0, "Y": 1.0, "Z": -0.3, "F": 10.0}),  # drill...
             Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": 0.1}),
             Path.Command("G0", {"X": 1.0, "Y": 1.0, "Z": -0.29}),
             Path.Command("G1", {"X": 1.0, "Y": 1.0, "Z": -0.5, "F": 10.0}),
@@ -463,7 +463,6 @@ class TestDrillCycleExpander(unittest.TestCase):
             self.assertEqual(res.Name, exp.Name, f"Command {i}: name mismatch")
             self.assertEqual(res.Parameters, exp.Parameters, f"Command {i}: parameters mismatch")
 
-
     # nb: DrillCycleExpander and UtilsParse.drill_translate are NOT identical. see issue #28984
     # So, we don't test for that.
 
@@ -475,12 +474,10 @@ class TestDrillCycleExpander(unittest.TestCase):
             # nb: g73 has a different code path too
             command = Path.Command("G83 X10.0 Y10.0 Z0 F100 R9.0 Q4")
 
-            modal_state = {"Z":20} # needs Z for initial move
+            modal_state = {"Z": 20}  # needs Z for initial move
 
-            expander = DrillCycleExpander(
-                retract_mode=retract, initial_position=modal_state.copy()
-            )
-            result = expander.expand_command( command )
+            expander = DrillCycleExpander(retract_mode=retract, initial_position=modal_state.copy())
+            result = expander.expand_command(command)
 
             as_strings = [x.toGCode() for x in result]
             lines = "\n".join(as_strings)
@@ -492,34 +489,38 @@ class TestDrillCycleExpander(unittest.TestCase):
             # Expected, new algorithm
 
             final_z = 20 if retract == "G98" else 9
-            expected = [ Path.Command(g) for g in [
-                # (tracking current.Z):
-                # No prelim Z, Z>R
-                "G0 X10 Y10 Z20", # prelim move, Z unchanged
-                "G0 X10 Y10 Z9", # start: to R if != Z
-                "G1 X10 Y10 Z5 F100", # drill
-                "G0 X10 Y10 Z9", # retract
-                f"G0 X10 Y10 Z{5 + 4*0.05}", # back to bottom
-                "G1 X10 Y10 Z1 F100", # drill
-                "G0 X10 Y10 Z9", # retract
-                f"G0 X10 Y10 Z{1 + 4*0.05}", # back to bottom
-                "G1 X10 Y10 Z0 F100", # drill
-                "G0 X10 Y10 Z9", # retract
-                f"G0 X10 Y10 Z{final_z}", # back to original-Z|R
+            expected = [
+                Path.Command(g)
+                for g in [
+                    # (tracking current.Z):
+                    # No prelim Z, Z>R
+                    "G0 X10 Y10 Z20",  # prelim move, Z unchanged
+                    "G0 X10 Y10 Z9",  # start: to R if != Z
+                    "G1 X10 Y10 Z5 F100",  # drill
+                    "G0 X10 Y10 Z9",  # retract
+                    f"G0 X10 Y10 Z{5 + 4*0.05}",  # back to bottom
+                    "G1 X10 Y10 Z1 F100",  # drill
+                    "G0 X10 Y10 Z9",  # retract
+                    f"G0 X10 Y10 Z{1 + 4*0.05}",  # back to bottom
+                    "G1 X10 Y10 Z0 F100",  # drill
+                    "G0 X10 Y10 Z9",  # retract
+                    f"G0 X10 Y10 Z{final_z}",  # back to original-Z|R
                 ]
             ]
 
             self.assertEqual(
                 lines,
                 "\n".join([x.toGCode() for x in expected]),
-                f"For retract {retract} {command.toGCode()}"
+                f"For retract {retract} {command.toGCode()}",
             )
 
     @unittest.expectedFailure
     def test_bad_values(self):
         """Examples
-            r < Z
-            etc.
+        r < Z
+        etc.
         """
-        assertTrue(False, "FIXME: DrillCycleExpander returns [] on bad values, no way of reporting the issue")
-
+        assertTrue(
+            False,
+            "FIXME: DrillCycleExpander returns [] on bad values, no way of reporting the issue",
+        )
