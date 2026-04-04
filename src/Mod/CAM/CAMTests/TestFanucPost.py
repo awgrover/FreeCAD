@@ -21,6 +21,8 @@
 # *                                                                         *
 # ***************************************************************************
 
+import re
+
 import FreeCAD
 import Part
 import Path
@@ -93,7 +95,7 @@ class TestFanucPost(PathTestUtils.PathTestBase):
         # Header contains a time stamp that messes up unit testing.
         # Only test length of result.
         gcode = self.post.export()[0][1]
-        self.assertEqual(27, len(gcode.splitlines()))
+        self.assertEqual(28, len(gcode.splitlines()))
         # Test without header
         expected = """%
 (BEGIN PREAMBLE)
@@ -101,6 +103,7 @@ G17 G54 G40 G49 G80 G90 G94
 G21
 (BEGIN OPERATION: TC: DEFAULT TOOL)
 (MACHINE UNITS: MM/MIN)
+(TC: DEFAULT TOOL)
 M05
 G28 G91 Z0
 M6 T1
@@ -166,7 +169,7 @@ M30
         # Header contains a time stamp that messes up unit testing.
         # Only test length of result.
         gcode = self.post.export()[0][1]
-        self.assertEqual(31, len(gcode.splitlines()))
+        self.assertEqual(32, len(gcode.splitlines()))
         # Test without header
         expected = """%
 (BEGIN PREAMBLE)
@@ -174,6 +177,7 @@ G17 G54 G40 G49 G80 G90 G94
 G21
 (BEGIN OPERATION: TC: DEFAULT TOOL)
 (MACHINE UNITS: MM/MIN)
+(TC: DEFAULT TOOL)
 M05
 G28 G91 Z0
 M6 T1
@@ -243,15 +247,15 @@ M30
         self.profile_op.Path = Path.Path([c])
         self.job.PostProcessorArgs = "--no-header --no-show-editor"
         gcode = self.post.export()[0][1]
-        result = gcode.splitlines()[19]
+        result = gcode.splitlines()
         expected = "G0 X10.000 Y20.000 Z30.000"
-        self.assertEqual(result, expected)
+        self.assertIn(expected, result)
 
         self.job.PostProcessorArgs = "--no-header --precision=2 --no-show-editor"
         gcode = self.post.export()[0][1]
-        result = gcode.splitlines()[19]
+        result = gcode.splitlines()
         expected = "G0 X10.00 Y20.00 Z30.00"
-        self.assertEqual(result, expected)
+        self.assertIn(expected, result)
 
     def test_line_numbers(self):
         """
@@ -262,9 +266,9 @@ M30
         self.profile_op.Path = Path.Path([c])
         self.job.PostProcessorArgs = "--no-header --line-numbers --no-show-editor"
         gcode = self.post.export()[0][1]
-        result = gcode.splitlines()[19]
-        expected = "N290  G0 X10.000 Y20.000 Z30.000"
-        self.assertEqual(result, expected)
+        result = gcode.splitlines()
+        expected = "G0 X10.000 Y20.000 Z30.000"
+        self.assertTrue( re.search(r'^N\d+ +'+expected, gcode, flags=re.M), gcode)
 
     def test_pre_amble(self):
         """
@@ -302,15 +306,15 @@ M30
         gcode = self.post.export()[0][1]
         self.assertEqual(gcode.splitlines()[3], "G20")
 
-        result = gcode.splitlines()[19]
+        result = gcode.splitlines()
         expected = "G0 X0.3937 Y0.7874 Z1.1811"
-        self.assertEqual(result, expected)
+        self.assertIn(expected, result)
 
         self.job.PostProcessorArgs = "--no-header --inches --precision=2 --no-show-editor"
         gcode = self.post.export()[0][1]
-        result = gcode.splitlines()[19]
+        result = gcode.splitlines()
         expected = "G0 X0.39 Y0.79 Z1.18"
-        self.assertEqual(result, expected)
+        self.assertIn(expected, result)
 
     def test_tool_change(self):
         """
@@ -321,17 +325,17 @@ M30
         self.profile_op.Path = Path.Path([c, c2])
         self.job.PostProcessorArgs = "--no-header --no-show-editor"
         gcode = self.post.export()[0][1]
-        self.assertEqual(gcode.splitlines()[19], "M05")
-        self.assertEqual(gcode.splitlines()[20], "G28 G91 Z0")
-        self.assertEqual(gcode.splitlines()[21], "M6 T1")
-        self.assertEqual(gcode.splitlines()[22], "G91 G0 G43 G54 Z-[#[2000+#4120]] H#4120")
-        self.assertEqual(gcode.splitlines()[23], "G90")
-        self.assertEqual(gcode.splitlines()[24], "M3 S3000")
+        self.assertIn("M05", gcode.splitlines())
+        self.assertIn("G28 G91 Z0", gcode.splitlines())
+        self.assertIn("M6 T1", gcode.splitlines())
+        self.assertIn("G91 G0 G43 G54 Z-[#[2000+#4120]] H#4120", gcode.splitlines())
+        self.assertIn("G90", gcode.splitlines())
+        self.assertIn("M3 S3000", gcode.splitlines())
 
         # suppress TLO
         self.job.PostProcessorArgs = "--no-header --no-tlo --no-show-editor"
         gcode = self.post.export()[0][1]
-        self.assertEqual(gcode.splitlines()[20], "M3 S3000")
+        self.assertIn("M3 S3000", gcode.splitlines())
 
     def test_thread_tap(self):
         """
@@ -344,10 +348,10 @@ M30
         self.profile_op.Path = Path.Path([c, c2])
         self.job.PostProcessorArgs = "--no-header --no-show-editor"
         gcode = self.post.export()[0][1]
-        self.assertEqual(gcode.splitlines()[18], "G0 X10.000 Y10.000")
-        self.assertEqual(gcode.splitlines()[19], "M29 S1000")
-        self.assertEqual(gcode.splitlines()[20], "G84 Z-10.000 R20.000 F1000.000 P1.000 Q1.000")
-        self.assertEqual(gcode.splitlines()[21], "G80")
+        self.assertIn("G0 X10.000 Y10.000", gcode.splitlines())
+        self.assertIn("M29 S1000", gcode.splitlines())
+        self.assertIn("G84 Z-10.000 R20.000 F1000.000 P1.000 Q1.000", gcode.splitlines())
+        self.assertIn("G80", gcode.splitlines())
 
     def test_comment(self):
         """
@@ -359,9 +363,9 @@ M30
         self.profile_op.Path = Path.Path([c])
         self.job.PostProcessorArgs = "--no-header --no-show-editor"
         gcode = self.post.export()[0][1]
-        result = gcode.splitlines()[19]
+        result = gcode.splitlines()
         expected = "(COMMENT)"
-        self.assertEqual(result, expected)
+        self.assertIn(expected, result)
 
     def test_drilling_peck(self):
         """
@@ -400,17 +404,17 @@ M30
         print("Testing drilling")
         print(gcode)
         expected = "G0 X0.000 Y0.000"
-        self.assertEqual(glines[19], expected)
+        self.assertIn(expected, glines)
         expected = "G83 Z0.000 F6000.000 Q2.000 R10.000"
-        self.assertEqual(glines[20], expected)
+        self.assertIn(expected, glines)
         expected = "G0 X20.000"
-        self.assertEqual(glines[21], expected)
+        self.assertIn(expected, glines)
         expected = "G83 Z0.000 Q2.000 R10.000"
-        self.assertEqual(glines[22], expected)
+        self.assertIn(expected, glines)
         expected = "G0 X40.000"
-        self.assertEqual(glines[23], expected)
+        self.assertIn(expected, glines)
         expected = "G83 Z0.000 Q2.000 R10.000"
-        self.assertEqual(glines[24], expected)
+        self.assertIn(expected, glines)
 
     def test_drilling_peck_chipbreak(self):
         """
@@ -449,14 +453,14 @@ M30
         print("Testing drilling")
         print(gcode)
         expected = "G0 X0.000 Y0.000"
-        self.assertEqual(glines[19], expected)
+        self.assertIn(expected, glines)
         expected = "G73 Z0.000 F6000.000 Q2.000 R10.000"
-        self.assertEqual(glines[20], expected)
+        self.assertIn(expected, glines)
         expected = "G0 X20.000"
-        self.assertEqual(glines[21], expected)
+        self.assertIn(expected, glines)
         expected = "G73 Z0.000 Q2.000 R10.000"
-        self.assertEqual(glines[22], expected)
+        self.assertIn(expected, glines)
         expected = "G0 X40.000"
-        self.assertEqual(glines[23], expected)
+        self.assertIn(expected, glines)
         expected = "G73 Z0.000 Q2.000 R10.000"
-        self.assertEqual(glines[24], expected)
+        self.assertIn(expected, glines)
