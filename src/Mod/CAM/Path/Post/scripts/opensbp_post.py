@@ -80,7 +80,7 @@ class OpenSBPPost(PostProcessor):
     # It may include commands that Post/Processor.py shouldn't generate (cf. Constants.GCODE_SUPPORTED and Constants.MCODE_SUPPORTED and Constants.GCODE_NON_CONFORMING)
     # Compatible should just pass-through
     GCodeNative = set(
-        "G0 G00 G1 G01 G4 G04 G20 G21 G28 G29 G38.2 G90 G91 G92 M0 M00 M1 M01 M2 M02 M3 M03 M5 M05 M8 M08 M9 M09 M10 M11 M30".split(
+        "G0 G00 G1 G01 G4 G04 G20 G21 G28 G29 G38.2 G92 M0 M00 M1 M01 M2 M02 M3 M03 M5 M05 M8 M08 M9 M09 M10 M11 M30".split(
             " "
         )
     )
