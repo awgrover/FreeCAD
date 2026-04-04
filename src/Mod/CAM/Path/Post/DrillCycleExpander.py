@@ -32,7 +32,6 @@ import Path
 from Path.Base.MachineState import MachineState
 from Constants import GCODE_EXPANDABLE_DRILL
 
-
 debug = True
 if debug:
     Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
@@ -49,8 +48,8 @@ class DrillCycleExpander:
 
     def __init__(
         self,
-        machine_state : MachineState, # we mutate
-        chipbreaking_amount : None|float = None, # only G73, default 5%, a distance
+        machine_state: MachineState,  # we mutate
+        chipbreaking_amount: None | float = None,  # only G73, default 5%, a distance
     ):
         """
         Initialize the expander.
@@ -76,7 +75,7 @@ class DrillCycleExpander:
 
         # Handle modal commands - filter them out after processing
         if cmd_name in ["G98", "G99"]:
-            self.machine_state.addCommand( command )
+            self.machine_state.addCommand(command)
             return []  # Filter out after processing
         elif cmd_name == "G90":
             return []  # Filter out after processing
@@ -95,7 +94,7 @@ class DrillCycleExpander:
             return result
 
         # Update position for non-drill commands
-        self.machine_state.addCommand( command )
+        self.machine_state.addCommand(command)
 
         # Pass through other commands unchanged
         Path.Log.debug(f"Passing through command: {command}")
@@ -119,23 +118,33 @@ class DrillCycleExpander:
 
         # Required parameters
 
-        missing_state = [ a for a in ("Z","ReturnMode", "G0F") if getattr(self.machine_state, a) is None ]
+        missing_state = [
+            a for a in ("Z", "ReturnMode", "G0F") if getattr(self.machine_state, a) is None
+        ]
         if missing_state:
             # should be an internal error only
-            raise Exception(f"Drill-cycle-expand.machine_state (starting state) requires Z, G0F, and ReturnMode: {command}, {self.machine_state} missing {missing_state}")
+            raise Exception(
+                f"Drill-cycle-expand.machine_state (starting state) requires Z, G0F, and ReturnMode: {command}, {self.machine_state} missing {missing_state}"
+            )
 
-        missing_axis = [ a for a in "XYZ" if a not in command.Parameters or command.Parameters[a] is None ]
+        missing_axis = [
+            a for a in "XYZ" if a not in command.Parameters or command.Parameters[a] is None
+        ]
         if missing_axis:
             # should be an internal error only
-            raise Exception(f"Drill-cycle-expand requires X,Y & Z axis: {command}, missing {missing_axis}")
-        missing_param = [ p for p in "RF" if command.Parameters.get(p, None) is None ]
-        if command.Name in ["G83","G73"] and command.Parameters.get("Q", None) is None:
-            missing_param.append('Q')
+            raise Exception(
+                f"Drill-cycle-expand requires X,Y & Z axis: {command}, missing {missing_axis}"
+            )
+        missing_param = [p for p in "RF" if command.Parameters.get(p, None) is None]
+        if command.Name in ["G83", "G73"] and command.Parameters.get("Q", None) is None:
+            missing_param.append("Q")
         if command.Name in ["G82"] and command.Parameters.get("P", None) is None:
-            missing_param.append('P')
+            missing_param.append("P")
         if missing_param:
             # should be an internal error only
-            raise Exception(f"Drill-cycle-expand requires {' & '.join(missing_param)} parameter: {command}")
+            raise Exception(
+                f"Drill-cycle-expand requires {' & '.join(missing_param)} parameter: {command}"
+            )
 
         # DEBUG to be removed in next PR
         def bad(param, *which_commands):
@@ -143,7 +152,8 @@ class DrillCycleExpander:
                 return param
             else:
                 return None
-        if b:=(bad('Q', "G81","G82") or bad('P', "G73","G81","G83")):
+
+        if b := (bad("Q", "G81", "G82") or bad("P", "G73", "G81", "G83")):
             raise Exception(f"Unexpected param {b} for {command}")
 
         # Extract parameters
@@ -183,22 +193,22 @@ class DrillCycleExpander:
                     "F": self.machine_state.G0F,
                 },
             )
-            expanded.append( prelim )
-            self.machine_state.addCommand( prelim )
+            expanded.append(prelim)
+            self.machine_state.addCommand(prelim)
 
         # Move to XY position at current Z height (which should be R)
         if drill_x != self.machine_state.X or drill_y != self.machine_state.Y:
             prelim = Path.Command(
-                "G0", 
+                "G0",
                 {
-                    "X": drill_x, 
-                    "Y": drill_y, 
+                    "X": drill_x,
+                    "Y": drill_y,
                     "Z": self.machine_state.Z,
                     "F": self.machine_state.G0F,
                 },
             )
-            expanded.append( prelim )
-            self.machine_state.addCommand( prelim )
+            expanded.append(prelim)
+            self.machine_state.addCommand(prelim)
 
         # Ensure Z is at R position (might already be there from preliminary motion)
         if self.machine_state.Z != retract_z:
@@ -211,15 +221,13 @@ class DrillCycleExpander:
                     "F": self.machine_state.G0F,
                 },
             )
-            expanded.append( prelim )
-            self.machine_state.addCommand( prelim )
+            expanded.append(prelim)
+            self.machine_state.addCommand(prelim)
 
         # Perform the drilling operation
         # machine_state is tracked inside these two
         if cmd_name in ("G81", "G82"):
-            expanded.extend(
-                self._expand_g81_g82(command, drill_z, final_retract, feedrate)
-            )
+            expanded.extend(self._expand_g81_g82(command, drill_z, final_retract, feedrate))
         elif cmd_name in ("G73", "G83"):
             expanded.extend(
                 self._expand_g73_g83(command, drill_z, retract_z, final_retract, feedrate)
@@ -229,7 +237,7 @@ class DrillCycleExpander:
 
     def _expand_g81_g82(
         self,
-        command : Path.Command,
+        command: Path.Command,
         drill_z: float,
         final_retract: float,
         feedrate: Optional[float],
@@ -249,14 +257,14 @@ class DrillCycleExpander:
         if feedrate:
             move_params["F"] = feedrate
         new_command = Path.Command("G1", move_params)
-        expanded.append( new_command )
-        self.machine_state.addCommand( new_command )
+        expanded.append(new_command)
+        self.machine_state.addCommand(new_command)
 
         # Dwell for G82
         if cmd_name == "G82" and "P" in params:
             dwell_command = Path.Command("G4", {"P": params["P"]})
-            expanded.append( dwell_command )
-            self.machine_state.addCommand( dwell_command )
+            expanded.append(dwell_command)
+            self.machine_state.addCommand(dwell_command)
 
         # Retract
         retract_command = Path.Command(
@@ -268,14 +276,14 @@ class DrillCycleExpander:
                 "F": self.machine_state.G0F,
             },
         )
-        expanded.append( retract_command )
-        self.machine_state.addCommand( retract_command )
+        expanded.append(retract_command)
+        self.machine_state.addCommand(retract_command)
 
         return expanded
 
     def _expand_g73_g83(
         self,
-        command : Path.Command,
+        command: Path.Command,
         drill_z: float,
         retract_z: float,
         final_retract: float,
@@ -287,10 +295,14 @@ class DrillCycleExpander:
         cmd_name = command.Name
         params = command.Parameters
 
-        peck_depth = params.get("Q", abs(drill_z - retract_z)) # G81/G82 have no Q
+        peck_depth = params.get("Q", abs(drill_z - retract_z))  # G81/G82 have no Q
         current_depth = retract_z
         # for G73, Explicit or Small clearance amount
-        clearance = (current_depth + self.chipbreaking_amount) if self.chipbreaking_amount is not None else (peck_depth * 0.05)
+        clearance = (
+            (current_depth + self.chipbreaking_amount)
+            if self.chipbreaking_amount is not None
+            else (peck_depth * 0.05)
+        )
 
         while current_depth > drill_z:
             # Calculate next peck depth
@@ -308,8 +320,8 @@ class DrillCycleExpander:
                         "F": self.machine_state.G0F,
                     },
                 )
-                expanded.append( down_command )
-                self.machine_state.addCommand( down_command )
+                expanded.append(down_command)
+                self.machine_state.addCommand(down_command)
 
             # Feed to next depth
             move_params = {
@@ -320,12 +332,12 @@ class DrillCycleExpander:
             if feedrate:
                 move_params["F"] = feedrate
             feed_command = Path.Command("G1", move_params)
-            expanded.append( feed_command )
-            self.machine_state.addCommand( feed_command )
+            expanded.append(feed_command)
+            self.machine_state.addCommand(feed_command)
 
             # Retract based on cycle type
             if cmd_name == "G73":
-                if next_depth == drill_z: # should be covered by final retract after if/else
+                if next_depth == drill_z:  # should be covered by final retract after if/else
                     # Final peck - retract to R
                     retract_command = Path.Command(
                         "G0",
@@ -336,8 +348,8 @@ class DrillCycleExpander:
                             "F": self.machine_state.G0F,
                         },
                     )
-                    expanded.append( retract_command )
-                    self.machine_state.addCommand( retract_command )
+                    expanded.append(retract_command)
+                    self.machine_state.addCommand(retract_command)
                 else:
                     # Chip breaking - small retract
                     chip_break_height = next_depth + clearance
@@ -350,8 +362,8 @@ class DrillCycleExpander:
                             "F": self.machine_state.G0F,
                         },
                     )
-                    expanded.append( chip_command )
-                    self.machine_state.addCommand( chip_command )
+                    expanded.append(chip_command)
+                    self.machine_state.addCommand(chip_command)
 
             elif cmd_name == "G83":
                 # Full retract to R plane
@@ -364,8 +376,8 @@ class DrillCycleExpander:
                         "F": self.machine_state.G0F,
                     },
                 )
-                expanded.append( retract_command )
-                self.machine_state.addCommand( retract_command )
+                expanded.append(retract_command)
+                self.machine_state.addCommand(retract_command)
 
             current_depth = next_depth
 
@@ -380,8 +392,8 @@ class DrillCycleExpander:
                     "F": self.machine_state.G0F,
                 },
             )
-            expanded.append( final_command )
-            self.machine_state.addCommand( final_command )
+            expanded.append(final_command)
+            self.machine_state.addCommand(final_command)
 
         return expanded
 

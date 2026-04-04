@@ -159,28 +159,27 @@ class TestPathHelpers(PathTestBase):
         results = PathUtils.filterArcs(l)
         self.assertTrue(len(results) == 0)
 
-
     def test_machinestate_for_drill_g98(self):
         """For a drill-command, G98 returns to Z, and max(Z,R)"""
 
         # Z>R
         initial_z = 20
-        machine_state = PathMachineState.MachineState( {"Z":initial_z} )
-        machine_state.addCommand(Path.Command( "G83 Z19 R15"))
+        machine_state = PathMachineState.MachineState({"Z": initial_z})
+        machine_state.addCommand(Path.Command("G83 Z19 R15"))
 
         self.assertEqual(machine_state.Z, initial_z, "G98 should return to Z")
 
         # Z<R
-        initial_z = 14 
-        machine_state = PathMachineState.MachineState( {"Z":initial_z} )
-        machine_state.addCommand(Path.Command( "G83 Z19 R15"))
+        initial_z = 14
+        machine_state = PathMachineState.MachineState({"Z": initial_z})
+        machine_state.addCommand(Path.Command("G83 Z19 R15"))
 
         self.assertEqual(machine_state.Z, 15, "G98 should return to max(Z,R) which is R")
- 
+
     def test_machinestate_for_drill_g99(self):
         """For a drill-command, G99 returns to R, not initial z"""
         initial_z = 20
-        machine_state = PathMachineState.MachineState( {"Z":initial_z, "ReturnMode":"R"} )
-        machine_state.addCommand(Path.Command( "G83 Z19 R15"))
+        machine_state = PathMachineState.MachineState({"Z": initial_z, "ReturnMode": "R"})
+        machine_state.addCommand(Path.Command("G83 Z19 R15"))
 
         self.assertEqual(machine_state.Z, 15, "G99 should return to R")

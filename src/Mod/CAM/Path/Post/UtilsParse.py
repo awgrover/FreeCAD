@@ -427,7 +427,7 @@ def drill_translate(
     if values["MOTION_MODE"] == "G91":
         # force absolute coordinates during cycles, fixup of xyz below
         gcode.append(f"{linenumber(values)}G90")
-        restore_state.append("G91") # and revert when done
+        restore_state.append("G91")  # and revert when done
 
     ##
     drill_x = Units.Quantity(params.get("X", motion_location["X"]), Units.Length)
@@ -437,7 +437,7 @@ def drill_translate(
     if retract_z < drill_z:  # R less than Z is error
         comment = create_comment(values, "Drill cycle error: R less than Z")
         gcode.append(f"{linenumber(values)}{comment}")
-        gcode.extend( restore_state )
+        gcode.extend(restore_state)
         return
     motion_z = Units.Quantity(motion_location["Z"], Units.Length)
     if values["MOTION_MODE"] == "G91":  # relative movements
@@ -450,7 +450,9 @@ def drill_translate(
 
     cmd = format_command_line(values, ["G0", f"Z{format_for_axis(values, retract_z)}"])
     G0_retract_z = f"{cmd}"
-    cmd = format_for_feed(values, Units.Quantity(params.get("F", motion_location["Z"]), Units.Velocity))
+    cmd = format_for_feed(
+        values, Units.Quantity(params.get("F", motion_location["Z"]), Units.Velocity)
+    )
     F_feedrate = f'{values["COMMAND_SPACE"]}F{cmd}'
 
     # preliminary movement(s)
@@ -482,7 +484,7 @@ def drill_translate(
         )
 
     # for G91
-    gcode.extend( restore_state )
+    gcode.extend(restore_state)
 
 
 def format_command_line(values: Values, command_line: CommandLine) -> str:
