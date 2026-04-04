@@ -619,13 +619,14 @@ class TestLinuxCNCPost(PathTestUtils.PathTestBase):
 
         self.profile_op.Path = Path.Path(
             [
-                Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 10.0}),
+                Path.Command("G98"),
+                Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 10.0, "F":110}),
                 # move +xy, move z->R, drill Z, z->R,
                 Path.Command("G81", {"X": 10.0, "Y": 10.0, "R": 9.0, "F":100, "Z": 0}),
-                Path.Command("G0", {"X": 1.0, "Y": 2.0, "Z": 10.0}),
+                Path.Command("G0", {"X": 1.0, "Y": 2.0, "Z": 10.0, "F":110}),
                 Path.Command("G82", {"X": 10.0, "Y": 10.0, "R": 9.0, "F":100, "Z": 0, "P": 2}),
-                Path.Command("G0", {"X": 3.0, "Y": 4.0, "Z": 10.0}),
-                Path.Command("G81", {"X": 10.0, "Y": 10.0, "R": 9.0, "F":100, "Z": 0,}),
+                Path.Command("G0", {"X": 3.0, "Y": 4.0, "Z": 10.0, "F":110}),
+                Path.Command("G81", {"X": 11.0, "Y": 11.0, "R": 9.1, "F":101, "Z": 1,}),
             ]
         )
         results = self.post.export2()
