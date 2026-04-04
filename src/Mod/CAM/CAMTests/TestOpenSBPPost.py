@@ -531,9 +531,11 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         # FIXME: a test-util function for gcode-name to arbitrary-good-gcode, to generate this list from Constants, etc
         handled_gcode = [ Path.Command(g) for g in
                 # trying to list all handled gcodes, is checked below against opensbp list
-                ("G0X1Y2Z3 G1X4Y5Z6 G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
-                "G20 G21 G38.2X1Y2Z3 G54 G90 G91 G92X4Y5Z6 "
+                (
+                "G0X1Y2Z3F110 G1X4Y5Z6 G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
+                "G20 G21 G38.2X1Y2Z3 G54 G92X4Y5Z6 "
                 # The drill params don't necessarily make sense in these, we just need certain params:
+                "G98 G99 "
                 "G73X1Y2Z7F100R91Q1 G74Z11R12 G80 G81X1Y2Z9F100R10 G82X1Y2Z10F100R11P12 G83X1Y2Z11F100R12Q2 G84Z12R13 G85Z1R2 G88Z30R31 G89Z3R4 "
                 "M0 M1 M3S1 M5 M6T2 M7 M8 M9 "
                 "(comment)"
@@ -564,6 +566,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 + Constants.GCODE_NON_CONFORMING
             )
             - self.post.GCodeUnsupported
+            - { "G90", "G91" } # not a Path nor Post thing
         )
         untried = set([p for p in all_possible if not re.search(r"0\d$", p)]) - set(
             [p.Name for p in handled_gcode]
@@ -682,7 +685,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 
         self.profile_op.Path = Path.Path(
             [ Path.Command(g) for g in [
-                "G0 X0.0 Y0.0 Z10.0",
+                "G98",
+                "G0 X0.0 Y0.0 Z10.0 F110",
                 "(G83)",
                 "G83 X10.0 Y10.0 Z0 F100 R9.0 Q4",
                 # move +xy, move z->R, drill Z, z->R,
@@ -691,7 +695,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 "G0 X1.0 Y2.0 Z10.0",
                 "(G82)",
                 "G82 X10.0 Y10.0 F100 R9.0 Z0 L2 P3",
-                "G0 X3.0 Y4.0 Z10.0",
+                "G0 X3.0 Y4.0 Z10.0 F110",
                 "(G82 w/Q)",
                 "G81 X10.0 Y10.0 F100 R9.0 Z0",
             ]]
