@@ -477,7 +477,7 @@ class TestToolProcessing(unittest.TestCase):
             self.assertGreater(len(all_output), 0, "Should have non-empty output")
 
             self.assertIn(
-                "(pretoolchange)", all_output, "Pre-tool-change block should appear in output"
+                "(pretoolchange)", all_output, f"Pre-tool-change block should appear in output\n{all_output}"
             )
             self.assertIn(
                 "(posttoolchange)", all_output, "Post-tool-change block should appear in output"

@@ -63,12 +63,19 @@ def generate(toolnumber, toollabel, spindlespeed=0, spindledirection=SpindleDire
     commands = []
 
     commands.append(Path.Command(f"({toollabel})"))
-    commands.append(Path.Command("M6", {"T": int(toolnumber)}))
+    tc = Path.Command("M6", {"T": int(toolnumber)})
+    tc.addAnnotations({
+        "label": toollabel, # FIXME: want the Tool name (not tc name)
+    })
 
+    commands.append(tc)
+
+    # FIXME: test both branches
     if spindledirection is SpindleDirection.OFF:
         return commands
     else:
-        commands.append(Path.Command(spindledirection.value, {"S": spindlespeed}))
+        spindle_on = "M3" if spindledirection == SpindleDirection.CW else "M4"
+        commands.append(Path.Command(spindle_on, {"S": spindlespeed}))
 
     Path.Log.track(commands)
     return commands
