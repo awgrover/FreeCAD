@@ -38,6 +38,7 @@ import Path
 import Path.Post.Utils as PostUtils
 import Path.Post.UtilsArguments as PostUtilsArguments
 import Path.Post.UtilsExport as PostUtilsExport
+from Path.Base.MachineState import MachineState
 from Path.Post import PostList
 from Path.Post.UtilsParse import format_command_line
 from Path.Post.DrillCycleExpander import DrillCycleExpander
@@ -947,6 +948,10 @@ class PostProcessor:
 
         Path.Log.track("Expanding canned cycles")
 
+        # We do NOT start at axis 0, we start undefined
+        machine_state = MachineState( {k:None for k in MachineState.Tracked} )
+        machine_state.Coolant = False
+
         to_translate = self._machine.postprocessor_properties.get("drill_cycles_to_translate", None)
         if True:
             print(  # DEBUG
@@ -975,13 +980,6 @@ class PostProcessor:
             print(f"#== replace ?: {item.Path.Commands}")
             translated = []
 
-            mock_modal_state = {  # self._modal_state, # HACK: modal-state when we track it. next PR
-                "X": 0,
-                "Y": 0,
-                "Z": 0,
-                "F": 1000,
-            }
-
             # only used by G73
             if "CHIPBREAKING_AMOUNT" in self.values: # FIXME: add to Machine, Units.Quantity
                 v_chipbreak = self.values["CHIPBREAKING_AMOUNT"]
@@ -994,8 +992,7 @@ class PostProcessor:
                 chipbreaking_amount = None
 
             expander = DrillCycleExpander(
-                        initial_position = mock_modal_state.copy(), # HACK: get from modal-state when we track it. next PR
-                        retract_mode = "G98",  # HACK: get from modal-state when we track it. next PR
+                        machine_state, # it mutates this
                         chipbreaking_amount = chipbreaking_amount
             )
 
@@ -1005,22 +1002,27 @@ class PostProcessor:
                     if drill_translated == []:
                         raise Exception(f"Unknown error in {command}") # FIXME: we need more info for a useful user error.
 
+                    # machine_state should be correct
                     translated.extend( drill_translated )
                     print(f"#== replace expand  : {translated}")
                 else:
+                    machine_state.addCommand( command )
                     translated.append(command)
 
             item.Path = Path.Path(translated)
-            print(f"#== replace rez  : {item.Path.Commands}")
 
         # Go through postables
+        if to_translate:
+            for section_name, sublist in postables:
+                for item in sublist:
+                    if item.Path:
+                        replace_drill_cycles(item)
+
+        # Add cycle-terminator for any we didn't translate
         for section_name, sublist in postables:
             for item in sublist:
                 if item.Path:
-                    if to_translate:
-                        replace_drill_cycles(item)
-                    else:
-                        add_cannedCycleTerminator(item)
+                    add_cannedCycleTerminator(item)
 
     def _expand_split_arcs(self, postables):
         """Split arc commands into linear segments if configured.

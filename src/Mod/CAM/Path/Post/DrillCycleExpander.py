@@ -29,6 +29,7 @@ coupling to the postprocessing infrastructure.
 from typing import List, Optional
 
 import Path
+from Path.Base.MachineState import MachineState
 from Constants import GCODE_EXPANDABLE_DRILL
 
 
@@ -48,21 +49,16 @@ class DrillCycleExpander:
 
     def __init__(
         self,
-        retract_mode: str = "G98",
-        initial_position: Optional[dict] = None,
+        machine_state : MachineState, # we mutate
         chipbreaking_amount : None|float = None, # only G73, default 5%, a distance
     ):
         """
         Initialize the expander.
 
         Args:
-            retract_mode: "G98" (return to initial Z) or "G99" (return to R plane)
-            initial_position: Initial position dict with X, Y, Z keys
+            MachineState, including ReturnMode (G98/G99), and required initial axis XYZ, and F and G0F
         """
-        self.retract_mode = retract_mode
-        self.current_position = (
-            initial_position if initial_position else {"X": 0.0, "Y": 0.0, "Z": 0.0}
-        )
+        self.machine_state = machine_state
         self.chipbreaking_amount = chipbreaking_amount
 
     def expand_command(self, command: Path.Command) -> List[Path.Command]:
@@ -79,11 +75,8 @@ class DrillCycleExpander:
         params = command.Parameters
 
         # Handle modal commands - filter them out after processing
-        if cmd_name == "G98":
-            self.retract_mode = "G98"
-            return []  # Filter out after processing
-        elif cmd_name == "G99":
-            self.retract_mode = "G99"
+        if cmd_name in ["G98", "G99"]:
+            self.machine_state.addCommand( command )
             return []  # Filter out after processing
         elif cmd_name == "G90":
             return []  # Filter out after processing
@@ -93,15 +86,16 @@ class DrillCycleExpander:
 
         # Handle drill cycles
         if cmd_name in self.EXPANDABLE_CYCLES:
-            result = self._expand_drill_cycle(command)
+            try:
+                result = self._expand_drill_cycle(command)
+            except Exception as e:
+                raise Exception(f"During {command}") from e
+
             Path.Log.debug(f"Expanded drill cycle: {command} -> {result}")
             return result
 
         # Update position for non-drill commands
-        if cmd_name in ("G0", "G00", "G1", "G01"):
-            for axis in ("X", "Y", "Z"):
-                if axis in params:
-                    self.current_position[axis] = params[axis]
+        self.machine_state.addCommand( command )
 
         # Pass through other commands unchanged
         Path.Log.debug(f"Passing through command: {command}")
@@ -124,14 +118,20 @@ class DrillCycleExpander:
         cmd_name = command.Name.upper()
 
         # Required parameters
+
+        missing_state = [ a for a in ("Z","ReturnMode", "G0F") if getattr(self.machine_state, a) is None ]
+        if missing_state:
+            # should be an internal error only
+            raise Exception(f"Drill-cycle-expand.machine_state (starting state) requires Z, G0F, and ReturnMode: {command}, {self.machine_state} missing {missing_state}")
+
         missing_axis = [ a for a in "XYZ" if a not in command.Parameters or command.Parameters[a] is None ]
         if missing_axis:
             # should be an internal error only
-            raise Exception(f"Drill-cycle-expand requires X,Y & Z axis: {command} saw {missing_axis}")
-        missing_param = [ p for p in "RF" if p not in command.Parameters or command.Parameters[p] is None ]
-        if command.Name in ["G83","G73"] and ('Q' not in command.Parameters or command.Parameters["Q"] is None):
+            raise Exception(f"Drill-cycle-expand requires X,Y & Z axis: {command}, missing {missing_axis}")
+        missing_param = [ p for p in "RF" if command.Parameters.get(p, None) is None ]
+        if command.Name in ["G83","G73"] and command.Parameters.get("Q", None) is None:
             missing_param.append('Q')
-        if command.Name in ["G82"] and ('P' not in command.Parameters or command.Parameters["P"] is None):
+        if command.Name in ["G82"] and command.Parameters.get("P", None) is None:
             missing_param.append('P')
         if missing_param:
             # should be an internal error only
@@ -153,13 +153,13 @@ class DrillCycleExpander:
         retract_z = command.Parameters["R"]
         feedrate = command.Parameters["F"]
 
-        # Store initial Z for G98 mode
-        initial_z = self.current_position["Z"]
+        # Store initial Z for G98 (Z-return) mode
+        initial_z = self.machine_state.Z
 
         # Determine final retract height
-        if self.retract_mode == "G98":
+        if self.machine_state.ReturnMode == "Z":
             final_retract = max(initial_z, retract_z)
-        else:  # G99
+        else:  # G99 (R)
             final_retract = retract_z
 
         # Error check
@@ -173,42 +173,49 @@ class DrillCycleExpander:
         expanded = []
 
         # Preliminary motion: If Z < R, move Z to R once (LinuxCNC spec)
-        if self.current_position["Z"] < retract_z:
-            expanded.append(
-                Path.Command(
-                    "G0",
-                    {
-                        "X": self.current_position["X"],
-                        "Y": self.current_position["Y"],
-                        "Z": retract_z,
-                    },
-                )
+        if self.machine_state.Z < retract_z:
+            prelim = Path.Command(
+                "G0",
+                {
+                    "X": self.machine_state.X,
+                    "Y": self.machine_state.Y,
+                    "Z": retract_z,
+                    "F": self.machine_state.G0F,
+                },
             )
-            self.current_position["Z"] = retract_z
+            expanded.append( prelim )
+            self.machine_state.addCommand( prelim )
 
         # Move to XY position at current Z height (which should be R)
-        if drill_x != self.current_position.get("X", None) or drill_y != self.current_position.get("Y", None):
-            expanded.append(
-                Path.Command("G0", {"X": drill_x, "Y": drill_y, "Z": self.current_position["Z"]})
+        if drill_x != self.machine_state.X or drill_y != self.machine_state.Y:
+            prelim = Path.Command(
+                "G0", 
+                {
+                    "X": drill_x, 
+                    "Y": drill_y, 
+                    "Z": self.machine_state.Z,
+                    "F": self.machine_state.G0F,
+                },
             )
-            self.current_position["X"] = drill_x
-            self.current_position["Y"] = drill_y
+            expanded.append( prelim )
+            self.machine_state.addCommand( prelim )
 
         # Ensure Z is at R position (might already be there from preliminary motion)
-        if self.current_position["Z"] != retract_z:
-            expanded.append(
-                Path.Command(
-                    "G0",
-                    {
-                        "X": self.current_position["X"],
-                        "Y": self.current_position["Y"],
-                        "Z": retract_z,
-                    },
-                )
+        if self.machine_state.Z != retract_z:
+            prelim = Path.Command(
+                "G0",
+                {
+                    "X": self.machine_state.X,
+                    "Y": self.machine_state.Y,
+                    "Z": retract_z,
+                    "F": self.machine_state.G0F,
+                },
             )
-            self.current_position["Z"] = retract_z
+            expanded.append( prelim )
+            self.machine_state.addCommand( prelim )
 
         # Perform the drilling operation
+        # machine_state is tracked inside these two
         if cmd_name in ("G81", "G82"):
             expanded.extend(
                 self._expand_g81_g82(command, drill_z, final_retract, feedrate)
@@ -235,31 +242,34 @@ class DrillCycleExpander:
 
         # Feed to depth
         move_params = {
-            "X": self.current_position["X"],
-            "Y": self.current_position["Y"],
+            "X": self.machine_state.X,
+            "Y": self.machine_state.Y,
             "Z": drill_z,
         }
         if feedrate:
             move_params["F"] = feedrate
-        expanded.append(Path.Command("G1", move_params))
-        self.current_position["Z"] = drill_z
+        new_command = Path.Command("G1", move_params)
+        expanded.append( new_command )
+        self.machine_state.addCommand( new_command )
 
         # Dwell for G82
         if cmd_name == "G82" and "P" in params:
-            expanded.append(Path.Command("G4", {"P": params["P"]}))
+            dwell_command = Path.Command("G4", {"P": params["P"]})
+            expanded.append( dwell_command )
+            self.machine_state.addCommand( dwell_command )
 
         # Retract
-        expanded.append(
-            Path.Command(
-                "G0",
-                {
-                    "X": self.current_position["X"],
-                    "Y": self.current_position["Y"],
-                    "Z": final_retract,
-                },
-            )
+        retract_command = Path.Command(
+            "G0",
+            {
+                "X": self.machine_state.X,
+                "Y": self.machine_state.Y,
+                "Z": final_retract,
+                "F": self.machine_state.G0F,
+            },
         )
-        self.current_position["Z"] = final_retract
+        expanded.append( retract_command )
+        self.machine_state.addCommand( retract_command )
 
         return expanded
 
@@ -289,99 +299,91 @@ class DrillCycleExpander:
             # If not first peck, rapid to clearance above previous depth
             if current_depth != retract_z and cmd_name == "G83":
                 clearance_depth = current_depth + clearance
-                expanded.append(
-                    Path.Command(
-                        "G0",
-                        {
-                            "X": self.current_position["X"],
-                            "Y": self.current_position["Y"],
-                            "Z": clearance_depth,
-                        },
-                    )
+                down_command = Path.Command(
+                    "G0",
+                    {
+                        "X": self.machine_state.X,
+                        "Y": self.machine_state.Y,
+                        "Z": clearance_depth,
+                        "F": self.machine_state.G0F,
+                    },
                 )
+                expanded.append( down_command )
+                self.machine_state.addCommand( down_command )
 
             # Feed to next depth
             move_params = {
-                "X": self.current_position["X"],
-                "Y": self.current_position["Y"],
+                "X": self.machine_state.X,
+                "Y": self.machine_state.Y,
                 "Z": next_depth,
             }
             if feedrate:
                 move_params["F"] = feedrate
-            expanded.append(Path.Command("G1", move_params))
-            self.current_position["Z"] = next_depth
+            feed_command = Path.Command("G1", move_params)
+            expanded.append( feed_command )
+            self.machine_state.addCommand( feed_command )
 
             # Retract based on cycle type
             if cmd_name == "G73":
-                if next_depth == drill_z: # FIXME: should be covered by final retract after if/else
+                if next_depth == drill_z: # should be covered by final retract after if/else
                     # Final peck - retract to R
-                    expanded.append(
-                        Path.Command(
-                            "G0",
-                            {
-                                "X": self.current_position["X"],
-                                "Y": self.current_position["Y"],
-                                "Z": retract_z,
-                            },
-                        )
+                    retract_command = Path.Command(
+                        "G0",
+                        {
+                            "X": self.machine_state.X,
+                            "Y": self.machine_state.Y,
+                            "Z": retract_z,
+                            "F": self.machine_state.G0F,
+                        },
                     )
+                    expanded.append( retract_command )
+                    self.machine_state.addCommand( retract_command )
                 else:
                     # Chip breaking - small retract
                     chip_break_height = next_depth + clearance
-                    expanded.append(
-                        Path.Command(
-                            "G0",
-                            {
-                                "X": self.current_position["X"],
-                                "Y": self.current_position["Y"],
-                                "Z": chip_break_height,
-                            },
-                        )
-                    )
-            elif cmd_name == "G83":
-                # Full retract to R plane
-                expanded.append(
-                    Path.Command(
+                    chip_command = Path.Command(
                         "G0",
                         {
-                            "X": self.current_position["X"],
-                            "Y": self.current_position["Y"],
-                            "Z": retract_z,
+                            "X": self.machine_state.X,
+                            "Y": self.machine_state.Y,
+                            "Z": chip_break_height,
+                            "F": self.machine_state.G0F,
                         },
                     )
+                    expanded.append( chip_command )
+                    self.machine_state.addCommand( chip_command )
+
+            elif cmd_name == "G83":
+                # Full retract to R plane
+                retract_command = Path.Command(
+                    "G0",
+                    {
+                        "X": self.machine_state.X,
+                        "Y": self.machine_state.Y,
+                        "Z": retract_z,
+                        "F": self.machine_state.G0F,
+                    },
                 )
+                expanded.append( retract_command )
+                self.machine_state.addCommand( retract_command )
 
             current_depth = next_depth
 
         # Final retract
-        if self.current_position["Z"] != final_retract:
-            expanded.append(
-                Path.Command(
-                    "G0",
-                    {
-                        "X": self.current_position["X"],
-                        "Y": self.current_position["Y"],
-                        "Z": final_retract,
-                    },
-                )
+        if self.machine_state.Z != final_retract:
+            final_command = Path.Command(
+                "G0",
+                {
+                    "X": self.machine_state.X,
+                    "Y": self.machine_state.Y,
+                    "Z": final_retract,
+                    "F": self.machine_state.G0F,
+                },
             )
-            self.current_position["Z"] = final_retract
+            expanded.append( final_command )
+            self.machine_state.addCommand( final_command )
 
         return expanded
-
-    def _update_position(self, cmd: Path.Command) -> None:
-        """
-        Update the current position based on a movement command.
-
-        Args:
-            cmd: The command to update position from
-        """
-        if "X" in cmd.Parameters:
-            self.current_position["X"] = cmd.Parameters["X"]
-        if "Y" in cmd.Parameters:
-            self.current_position["Y"] = cmd.Parameters["Y"]
-        if "Z" in cmd.Parameters:
-            self.current_position["Z"] = cmd.Parameters["Z"]
 
     def expand_commands(self, commands: List[Path.Command]) -> List[Path.Command]:
         """
