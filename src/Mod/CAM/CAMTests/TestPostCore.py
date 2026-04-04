@@ -1078,7 +1078,7 @@ class TestJobPropertyOverrides(unittest.TestCase):
         # Add M3/M4 commands to trigger plasma behavior
         plasma_commands = [
             Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 5.0}),
-            Path.Command("M3", {}),  # Torch on - should trigger pierce delay
+            Path.Command("M3", {"S":1}),  # Torch on - should trigger pierce delay
             Path.Command("G1", {"X": 100.0, "Y": 0.0, "Z": -5.0, "F": 100.0}),
             Path.Command("M5", {}),  # Torch off
             Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 5.0}),

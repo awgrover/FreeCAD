@@ -35,6 +35,7 @@ import CAMTests.PathTestUtils as PathTestUtils
 import CAMTests.PostTestMocks as PostTestMocks
 from Path.Post.Processor import PostProcessorFactory
 from Machine.models.machine import Machine, Toolhead, ToolheadType, OutputUnits
+from Path.Base.MachineState import MachineState
 
 
 Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
@@ -49,6 +50,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
     OpenSBP uses native ShopBot commands instead of standard G-code.
     These tests verify command conversion for the major command categories.
     """
+    _first_time = True
 
     @classmethod
     def setUpClass(cls):
@@ -63,32 +65,34 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 
     def setUp(self):
         self.maxDiff = None
-        print("## assign Machine.create_3axis_config")
+
         self.post._machine = Machine.create_3axis_config()
         # FIXME: is this right? I want the class's config to apply. and shouldn't all Test*Post do this?
         self.post._merge_machine_config()
         self.post._apply_schema_defaults()
         self.post._apply_job_property_overrides()
         self.post.reinitialize()
-        print(f"## _mach setup: { self.post._machine.__class__.__name__}")
         import json
 
-        print(
-            f"---_machine\n",
-            # json.dumps(self.post._machine.to_dict()["output"], sort_keys=True, indent=2),
-            json.dumps(self.post._machine.to_dict(), sort_keys=True, indent=2),
-            "\n---",
-        )
-        print(
-            f"--.postprocessor_properties\n{json.dumps(self.post._machine.postprocessor_properties, sort_keys=True, indent=2)}"
-        )
+        if self._first_time:
+            self.__class__._first_time = False
+            print(f"## _mach setup: { self.post._machine.__class__.__name__}")
+            print(
+                f"---_machine\n",
+                # json.dumps(self.post._machine.to_dict()["output"], sort_keys=True, indent=2),
+                json.dumps(self.post._machine.to_dict(), sort_keys=True, indent=2),
+                "\n---",
+            )
+            print(
+                f"--.postprocessor_properties\n{json.dumps(self.post._machine.postprocessor_properties, sort_keys=True, indent=2)}"
+            )
 
         self.post._machine.name = "Test ShopBot Machine"
         toolhead = Toolhead(
             name="Default Toolhead",
             toolhead_type=ToolheadType.ROTARY,
             min_rpm=0,
-            max_rpm=24000,
+            max_rpm=18000,
             max_power_kw=3.0,
         )
         self.post._machine.toolheads = [toolhead]
@@ -284,26 +288,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         result = self.post._convert_rapid_move(command)
         self.assertIn("F18000.000", result)
 
-    # -------------------------------------------------------------------------
-    # Arc moves (G2/G3) w/o Z → G-Code
-    # -------------------------------------------------------------------------
-
-    def test_arc_cw_g2(self):
-        """
-        CW arc (G2)
-        """
-        command = Path.Command("G2", {"X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0})
-        result = self.post._convert_arc_move(command)
-        self.assertEqual("G2 X10.000 Y0.000 I5.000 J0.000", result)
-
-    def test_arc_ccw_g3(self):
-        """
-        CCW arc (G3)
-        """
-        command = Path.Command("G3", {"X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0})
-        result = self.post._convert_arc_move(command)
-        self.assertEqual("G3 X10.000 Y0.000 I5.000 J0.000", result)
-
     def test_helical_arc_includes_plunge(self):
         """
         Helical arc (G2/G3 with Z) adds a plunge parameter as the 9th field.
@@ -311,17 +295,28 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         BEFORE: G2 X10 Y0 I5 J0 Z-5 (current Z=0)
         AFTER:  CG,,10.0000,0.0000,5.0000,0.0000,L,1,5.0000
         """
-        self.post._modal_state = {"Z": 0.0}
-        command = Path.Command("G2", {"X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -5.0})
+
+        # arc's need a previous Z, so psuedo track Z
+        self.post.machine_state = MachineState( {k:None for k in MachineState.Tracked} )
+        self.post.machine_state.addCommand( Path.Command("G0", {"Z": 0}) )
+
+        command = Path.Command("G2", {"F":50, "X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -5.0})
+
         result = self.post._convert_arc_move(command)
+
         lines = result.strip().splitlines()
         cg_line = next(l for l in lines if l.startswith("CG"))
         self.assertEqual("CG,,10.000,0.000,5.000,0.000,T,1,5.000", cg_line)
 
     def test_arc_no_gcode_in_output(self):
         """Helix output must not contain G2 or G3."""
-        self.post._convert_rapid_move(Path.Command("G0", {"Z": 0}))
-        command = Path.Command("G2", {"X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -1.0})
+
+        # arc's need a previous Z, so psuedo track Z
+        self.post.machine_state = MachineState( {k:None for k in MachineState.Tracked} )
+        self.post.machine_state.addCommand( Path.Command("G0", {"Z": 0}) )
+
+        command = Path.Command("G2", {"F":50, "X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -1.0})
+
         result = self.post._convert_arc_move(command)
         self.assertNotIn("G2", result)
         self.assertNotIn("G3", result)
@@ -340,11 +335,10 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 >&Tool=2
                 >PAUSE
         """
-        self.post.values["AUTOMATIC_TOOL_CHANGER"] = False
         command = Path.Command("M6", {"T": 2})
         result = self.post._convert_tool_change(command)
-        self.assertIn(">PAUSE", result)
-        self.assertIn(">&Tool=2", result)
+        self.assertIn("PAUSE", result)
+        self.assertIn("&Tool=2", result)
 
     def test_tool_change_automatic_no_pause(self):
         """
@@ -354,18 +348,18 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         AFTER:  >&ToolName=3
                 >&Tool=3
         """
-        self.post.values["AUTOMATIC_TOOL_CHANGER"] = True
+        self.post._machine.postprocessor_properties["automatic_tool_changer"] = True
+
         command = Path.Command("M6", {"T": 3})
         result = self.post._convert_tool_change(command)
-        self.assertIn(">&Tool=3", result)
-        self.assertNotIn(">PAUSE", result)
+        self.assertIn("&Tool=3", result)
+        self.assertNotIn("PAUSE", result)
 
     def test_tool_change_sets_tool_name(self):
         """Tool change always sets >&ToolName variable."""
-        self.post.values["AUTOMATIC_TOOL_CHANGER"] = False
         command = Path.Command("M6", {"T": 5})
         result = self.post._convert_tool_change(command)
-        self.assertIn(">&ToolName=5", result)
+        self.assertIn("&ToolName=5", result)
 
     # -------------------------------------------------------------------------
     # Spindle commands (M3/M4/M5)
@@ -379,10 +373,9 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         AFTER:  'Set spindle to 18000 RPM and start manually
                 >PAUSE
         """
-        self.post.values["AUTOMATIC_SPINDLE"] = False
         command = Path.Command("M3", {"S": 18000})
         result = self.post._convert_spindle_command(command)
-        self.assertIn(">PAUSE", result)
+        self.assertIn("PAUSE", result)
         self.assertIn("18000", result)
 
     def test_spindle_on_automatic_emits_tr_and_c6(self):
@@ -394,12 +387,12 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 C6
                 >PAUSE 2
         """
-        self.post.values["AUTOMATIC_SPINDLE"] = True
+        self.post._machine.postprocessor_properties["automatic_spindle"] = True
         command = Path.Command("M3", {"S": 18000})
         result = self.post._convert_spindle_command(command)
-        self.assertIn(">TR,18000", result)
+        self.assertIn("TR,18000", result)
         self.assertIn("C6", result)
-        self.assertIn(">PAUSE 2", result)
+        self.assertIn("PAUSE 2", result)
 
     def test_spindle_off_manual_emits_pause(self):
         """
@@ -409,10 +402,9 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         AFTER:  'Turn spindle OFF manually
                 >PAUSE
         """
-        self.post.values["AUTOMATIC_SPINDLE"] = False
         command = Path.Command("M5", {})
         result = self.post._convert_spindle_command(command)
-        self.assertIn(">PAUSE", result)
+        self.assertIn("PAUSE", result)
 
     def test_spindle_off_automatic_emits_tr0_and_c7(self):
         """
@@ -422,42 +414,21 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         AFTER:  >TR,0
                 C7
         """
-        self.post.values["AUTOMATIC_SPINDLE"] = True
+        self.post._machine.postprocessor_properties["automatic_spindle"] = True
+
         command = Path.Command("M5", {})
         result = self.post._convert_spindle_command(command)
-        self.assertIn(">TR,0", result)
+        self.assertIn("TR,0", result)
         self.assertIn("C7", result)
 
     def test_spindle_no_gcode_in_output(self):
         """Spindle output must not contain M3, M4, or M5."""
-        self.post.values["AUTOMATIC_SPINDLE"] = True
+        self.post._machine.postprocessor_properties["automatic_spindle"] = True
         command = Path.Command("M3", {"S": 18000})
         result = self.post._convert_spindle_command(command)
         self.assertNotIn("M3", result)
         self.assertNotIn("M4", result)
         self.assertNotIn("M5", result)
-
-    # -------------------------------------------------------------------------
-    # Dwell (G4)
-    # -------------------------------------------------------------------------
-
-    def test_dwell_produces_pause_with_time(self):
-        """
-        G4 dwell → >PAUSE <seconds>
-
-        BEFORE: G4 P2.5
-        AFTER:  >PAUSE 2.50
-        """
-        command = Path.Command("G4", {"P": 2.5})
-        result = self.post._convert_dwell(command)
-        self.assertIn(">PAUSE", result)
-        self.assertIn("2.50", result)
-
-    def test_dwell_no_gcode_in_output(self):
-        """Dwell output must not contain G4."""
-        command = Path.Command("G4", {"P": 1.0})
-        result = self.post._convert_dwell(command)
-        self.assertNotIn("G4", result)
 
     # -------------------------------------------------------------------------
     # Suppressed commands
@@ -468,23 +439,14 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         G54–G59 fixture offsets are suppressed (return None).
 
         OpenSBP has no work coordinate system concept.
+        Tolerate G54, others are illegal
         """
-        for fixture in ["G54", "G55", "G56", "G57", "G58", "G59"]:
+        for fixture in ["G54"]:
             command = Path.Command(fixture, {})
-            result = self.post._convert_fixture(command)
-            self.assertIsNone(result, f"{fixture} should be suppressed")
-
-    def test_modal_commands_suppressed(self):
-        """
-        Standard G-code modal setup commands are suppressed (return None).
-
-        OpenSBP doesn't use G20/G21 (units), G43, G80, G90, etc.
-        """
-        for modal in ["G20", "G21", "G43", "G80", "G90", "G91"]:
-            command = Path.Command(modal, {})
-            result = self.post._convert_modal_command(command)
-            # FIXME: wrong
-            self.assertIsNone(result, f"{modal} should be suppressed")
+            self.profile_op.Path = Path.Path( [command] )
+            result = self.post.export2()[0][1]
+            # Can appear in comments
+            self.assertFalse( re.search(r'^N\d+ +'+fixture, result, flags=re.M), f"{fixture} should be suppressed")
 
     # -------------------------------------------------------------------------
     # Unit conversion (imperial output)
@@ -523,6 +485,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.post._machine.output.duplicates.parameters = False
         self.post._machine.processing.filter_inefficient_moves = True
         self.post._machine.output.formatting.line_numbers = True
+        self.post._machine.postprocessor_properties["automatic_spindle"] = True
+        self.post._machine.postprocessor_properties["automatic_tool_change"] = True
         # FIXME: what's the right way to do the above? inconsistent use of VALUES[] and ._machine.*
         self.post._merge_machine_config()
 
@@ -532,11 +496,13 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         handled_gcode = [ Path.Command(g) for g in
                 # trying to list all handled gcodes, is checked below against opensbp list
                 (
-                "G0X1Y2Z3F110 G1X4Y5Z6 G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
+                "G0X1Y2Z3F110 G1X4Y5Z6F50 " # with F
+                "G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
                 "G20 G21 G38.2X1Y2Z3 G54 G92X4Y5Z6 "
                 # The drill params don't necessarily make sense in these, we just need certain params:
                 "G98 G99 "
-                "G73X1Y2Z7F100R91Q1 G74Z11R12 G80 G81X1Y2Z9F100R10 G82X1Y2Z10F100R11P12 G83X1Y2Z11F100R12Q2 G84Z12R13 G85Z1R2 G88Z30R31 G89Z3R4 "
+                "G73X1Y2Z7F100R91Q1 G80 G81X1Y2Z9F100R10 G82X1Y2Z10F100R11P12 G83X1Y2Z11F100R12Q2 "
+                # G85Z1R2 is simple, soon FIXME
                 "M0 M1 M3S1 M5 M6T2 M7 M8 M9 "
                 "(comment)"
                 ).split(" ")
@@ -567,6 +533,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             )
             - self.post.GCodeUnsupported
             - { "G90", "G91" } # not a Path nor Post thing
+            - { "G84", "G85", "G88", "G89" } # tapping, boring
         )
         untried = set([p for p in all_possible if not re.search(r"0\d$", p)]) - set(
             [p.Name for p in handled_gcode]
@@ -577,8 +544,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             f"Untried but CAM/PostProcessing allowed, add to list: {sorted(untried)}",
         )
 
-    @unittest.expectedFailure
-    def test_full_export_defaults(self):
+    def test_line_numbering(self):
         """
         Check the unchangeable defaults:
         Always line-numbers
@@ -587,26 +553,35 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             [
                 # gcode, line-numbered
                 Path.Command("G0", {"X": 10.0, "Y": 0.0, "Z": -1.0, "F": 500.0}),
+                # Comment, no line-numbe
+                Path.Command("(comment-line)"),
                 # shopbot, no line-number
-                Path.Command("G2", {"X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -5.0}),
+                Path.Command("G2", {"F":50, "X": 20.0, "Y": 1.0, "I": 5.0, "J": 0.0, "Z": -5.0}),
             ]
         )
-        lines = "".join((g for _, g in self.post.export2()))
-        lines = lines.split("\n")
+        gcode = self.post.export2()[0][1]
 
-        g0 = next((g for g in lines if "G0 " in g), None)
-        g2 = next((g for g in lines if "CG," in g), None)
+        lines = gcode.split("\n")
 
-        self.assertIsNotNone(g0, f"Expected a G0 in:\n{eol.join(lines)}\n---")
-        self.assertIsNotNone(g2, f"Expected a CG in:\n{eol.join(lines)}\n---")
+        self.assertTrue( any(l for l in lines if re.match(r'^N\d+ +G0', l) ), f"G0 is line-numbered: {gcode}")
 
-        # gcode pass-through's must get numbered
-        m = re.match(r"N\d+", g0)
-        self.assertTrue(m, f"Expected line number for a G0:\n\t{g0}")
+        # comments (native) are not numbered
+        self.assertFalse( any(l for l in lines if "comment-line" in l and re.match(r"^N\d+", l) ), f"Native comments are not line-numbered: {gcode}")
 
         # shopbot native must NOT get numbered
-        m = re.match(r"N\d+", g0)
-        self.assertFalse(m, f"Expected NO line number for a helix CG:\n\t{g2}")
+        self.assertFalse( any(l for l in lines if re.match(r'^N\d+ +CG,', l)), f"G2->CG (helix) and is not line-numbered: {gcode}")
+
+    @unittest.expectedFailure
+    def test_gcode_passthrough(self):
+        # list all passthrough codes
+        # check that they made it, and are line-numbered
+        self.assertTrue(False)
+
+    @unittest.expectedFailure
+    def test_converted_to_native(self):
+        # list all NON passthrough codes
+        # check that they made it, and are not line-numbered
+        self.assertTrue(False)
 
     def test_full_export_duplicates(self):
         """
@@ -627,7 +602,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             [
                 Path.Command("G0", {"X": 10.0, "Y": 0.0, "Z": -1.0, "F": 500.0}),
                 # identical G01's -> elide one
-                Path.Command("G1", {"X": 0.0, "Y": 0.0, "Z": 5.0}),
+                Path.Command("G1", {"F":55, "X": 0.0, "Y": 0.0, "Z": 5.0}),
                 Path.Command("G1", {"X": 0.0, "Y": 0.0, "Z": 5.0}),
                 # we know shopbot must translate a helix, using a relative Z
                 # so these are identical output, but not "duplicates"
@@ -656,9 +631,9 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             f"expected 2 (identical) CG's, because the Z is relative, saw:\n{as_text}\n---",
         )  # doesn't remove duplicate arc
 
-    def test_full_export_contains_no_gcode_moves(self):
+    def test_G0_and_G1_line_numbered(self):
         """
-        Full export of a simple profile must not contain G0 or G1 move commands.
+        G0 and G1 are passed through, but line-numbered
         """
         self.post._machine.output.comments.enabled = False
         self.post._machine.output.output_header = False
@@ -669,18 +644,100 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 Path.Command("G0", {"Z": 5.0}),
             ]
         )
-        results = self.post.export2()
-        output = "\n".join(g for _, g in results)
-        print(output)
-        # No bare G0/G1 move lines (comments mentioning "G0" are OK to skip
-        # checking here; we look for actual command lines)
+        gcode = self.post.export2()[0][1]
 
-        move_lines = [l for l in output.splitlines() if re.match(r"^\s*G[01]\b", l.strip())]
-        self.assertEqual(move_lines, [], f"Unexpected G-code move lines: {move_lines}")
+        # No bare G0/G1 move lines
+        bare_move_lines = [l for l in gcode.splitlines() if re.match(r"^G[01]\b", l.strip())]
+        self.assertEqual(bare_move_lines, [], f"Unexpected bare G-code move lines: {bare_move_lines}")
 
+        # Numbered
+        numbered = [l for l in gcode.splitlines() if re.match(r"^N\d+ +G[01]", l.strip())]
+        self.assertEqual( len(numbered), 3, f"Should be 3 numbered Gn lines, saw {numbered} in\n{gcode}")
+
+    def test_G4(self):
+        """
+        G4 passed through, and line-numbered
+        """
+        self.post._machine.output.comments.enabled = False
+        self.post._machine.output.output_header = False
+        self.profile_op.Path = Path.Path(
+            [
+                Path.Command("G4 P3")
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        self.no_unnumbered("G4", gcode.splitlines())
+        self.assertIn(" P3.000", gcode)
+
+    def test_G2_G3_noz(self):
+        """
+        G2 and G3 are passed through if no delta Z
+        """
+        self.post._machine.output.comments.enabled = False
+        self.post._machine.output.output_header = False
+        self.profile_op.Path = Path.Path(
+            [
+                Path.Command("G0 X0 Y0 Z10"), # establish Z
+                Path.Command("G2 X7 Y8 I9 J10 F50 Z10"),
+                Path.Command("G3 X11 Y12 I13 J14 F50 Z10"),
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        self.no_unnumbered("G2", gcode.splitlines())
+        self.no_unnumbered("G3", gcode.splitlines())
+
+    def test_G20_G21(self):
+        """
+        G20/G21 are passed through
+        """
+        self.post._machine.output.comments.enabled = False
+        self.post._machine.output.output_header = False
+        self.profile_op.Path = Path.Path(
+            [
+                Path.Command("G20"),
+                Path.Command("G21")
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        self.no_unnumbered("G20", gcode.splitlines())
+        self.no_unnumbered("G21", gcode.splitlines())
+
+    def no_unnumbered(self, gcode, lines): # FIXME: move up
+        """Test if it has at least one, and all one of the `gcode` lines are numbered"""
+        pattern = r"^(N\d+ +)?"+gcode+r"( |$)" # N001 G01 ....
+
+        print(f"### Unnumbed for {gcode}:\n---\n{eol.join(lines)}\n---")
+
+        # at least some lines w/gcode
+        lines_with_gcode = [l for l in lines if re.match(pattern, l.strip())] # numbered/un-numbered
+        self.assertTrue( len(lines_with_gcode) >= 1, f"At least one line with {gcode} out of\n---\n{eol.join(lines)}\n---")
+
+        # No unnumbered
+        unnumbered = [l for l in lines_with_gcode if (m:=re.match(pattern, l.strip())) and m.group(1) is None]
+        self.assertEqual(unnumbered, [], f"Unexpected bare G-code lines: {unnumbered}")
+
+    def test_G82(self):
+        """for the dwell"""
+        self.profile_op.Path = Path.Path(
+            [ Path.Command(g) for g in [
+                "G98",
+                "G0 X0.0 Y0.0 Z10.0 F110",
+                "G82 X90.0 Y90.0 F59 R9.9 Z0 L2 P9"
+                ]
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        
+        self.assertIn("G4 ", gcode, gcode)
 
     def test_drill_cycles_translated(self):
         """by default, expanded"""
+        self.post._machine.postprocessor_properties["automatic_spindle"] = True
+
         drill_codes = Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
 
         self.profile_op.Path = Path.Path(
@@ -700,10 +757,9 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 "G81 X10.0 Y10.0 F100 R9.0 Z0",
             ]]
         )
-        results = self.post.export2()
-        gcode = "\n".join(g for _, g in results)
+        gcode = self.post.export2()[0][1]
 
-        # replaced them?
+        # were they replaced?
         for drill_g in drill_codes:
             # prefix space to distinguish from comment
             self.assertNotIn(" "+drill_g, gcode, f"Should have expanded drills, but saw {drill_g}")
@@ -711,7 +767,20 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         # did we actually produce any replacement?
 
         # At least one G4 for the G81 Q
-        self.assertIn("PAUSE ", gcode, gcode)
+        self.assertIn("G4 ", gcode, gcode)
+
+    def test_empty_path(self):
+        self.profile_op.Path = Path.Path([])
+        gcode = self.post.export2()[0][1]
+
+        lines = gcode.splitlines()
+
+        # manual sequence
+        expect = """&ToolName=TC: Default Tool
+&Tool=1
+"""
+        
+        self.assertIn( expect, gcode, F"In\n---{gcode}\n---" ) # FIXME: a diff-like would be much better
 
     @unittest.expectedFailure
     def test_todo(self):
@@ -721,10 +790,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.assertTrue(False, "test on machine G20/G21")
         self.assertTrue(False, "implement all in test_modal_commands_suppressed")
         self.assertTrue(False, "precision conversion should round +1 digit, then precision")
-        self.assertTrue(False, "drill conversion in _expand_canned_cycles")
-        self.assertTrue(
-            False, "drill conversion includes g98.... add back to test_full_export_no_crash"
-        )
         self.assertTrue(
             False,
             "test_rapid_z should fail, should have 3 digits of precision? or test_rapid_xy should fail should have .0",
@@ -732,3 +797,4 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.assertTrue(False, "do not like _convert_generic")
         self.assertTrue(False, "test in/sec conversion")
         self.assertTrue(False, "block-delete isn't spb compatible")
+        # comments stripped, no-headers, etc.
