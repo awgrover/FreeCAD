@@ -951,7 +951,9 @@ class PostProcessor:
         Subclasses can override to customize.
         """
 
-        do_line_numbers = getattr(getattr(self._machine.output, "formatting", None),"line_numbers", None)
+        do_line_numbers = getattr(
+            getattr(self._machine.output, "formatting", None), "line_numbers", None
+        )
         if not do_line_numbers:
             return
 
@@ -967,19 +969,20 @@ class PostProcessor:
             start = self._machine.output.formatting.line_number_start
             increment = self._machine.output.formatting.line_increment
         import itertools
+
         line_number = itertools.count(start, increment)
 
         for section_name, sublist in postables:
             for item in sublist:
-                
+
                 # count 'str' lines, because it might be gcode/commands
-                if item.item_type == 'str':
-                    str_lines = item.data['str'].count("\n")
-                    if item.data['str'] != "" and not item.data['str'].endswith("\n"):
+                if item.item_type == "str":
+                    str_lines = item.data["str"].count("\n")
+                    if item.data["str"] != "" and not item.data["str"].endswith("\n"):
                         # count last line
                         str_lines += 1
-                    for _ in range(0, item.data['str'].count("\n")):
-                        next( line_number )
+                    for _ in range(0, item.data["str"].count("\n")):
+                        next(line_number)
 
                 # number Path.Command's
                 elif item.Path:
@@ -987,13 +990,15 @@ class PostProcessor:
                     for command in item.Path.Commands:
                         # don't count comments
                         if command.Name.startswith("("):
-                            new_commands.append( command )
+                            new_commands.append(command)
                             continue
 
                         # Have to remake, because we change Parameters
-                        new_params = {"N":next(line_number)}
-                        new_params.update( command.Parameters )
-                        new_commands.append( Path.Command( command.Name, new_params, command.Annotations) )
+                        new_params = {"N": next(line_number)}
+                        new_params.update(command.Parameters)
+                        new_commands.append(
+                            Path.Command(command.Name, new_params, command.Annotations)
+                        )
                     item.path = Path.Path(new_commands)
 
     def _expand_canned_cycles(self, postables):
@@ -1006,7 +1011,7 @@ class PostProcessor:
         Path.Log.track("Expanding canned cycles")
 
         # We do NOT start at axis 0, we start undefined
-        machine_state = MachineState( {k:None for k in MachineState.Tracked} )
+        machine_state = MachineState({k: None for k in MachineState.Tracked})
 
         to_translate = self._machine.postprocessor_properties.get("drill_cycles_to_translate", None)
         if False:
@@ -1019,10 +1024,11 @@ class PostProcessor:
         def add_cannedCycleTerminator(item):
             # FIXME: combine with loop below for single pass: if any, and not translated, then add
             drill_commands = (
-                Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
+                Constants.GCODE_DRILL_EXTENDED
+                + Constants.GCODE_MOVE_DRILL
                 + [
-                "G86",  # FIXME: not in Constants
-                "G87",  # FIXME: not in Constants
+                    "G86",  # FIXME: not in Constants
+                    "G87",  # FIXME: not in Constants
                 ]
             )
 
@@ -1036,31 +1042,34 @@ class PostProcessor:
             translated = []
 
             # only used by G73
-            if "CHIPBREAKING_AMOUNT" in self.values: # FIXME: add to Machine, Units.Quantity
+            if "CHIPBREAKING_AMOUNT" in self.values:  # FIXME: add to Machine, Units.Quantity
                 v_chipbreak = self.values["CHIPBREAKING_AMOUNT"]
                 # pre-MBPP (args --chipbreaking_amount) can be string values e.g. "0.02 mm"
                 if isinstance(v_chipbreak, FreeCAD.Units.Quantity):
                     chipbreaking_amount = v_chipbreak.Value
                 else:
-                    chipbreaking_amount = FreeCAD.Units.Quantity( v_chipbreak, FreeCAD.Units.Length).Value
+                    chipbreaking_amount = FreeCAD.Units.Quantity(
+                        v_chipbreak, FreeCAD.Units.Length
+                    ).Value
             else:
                 chipbreaking_amount = None
 
             expander = DrillCycleExpander(
-                        machine_state, # it mutates this
-                        chipbreaking_amount = chipbreaking_amount
+                machine_state, chipbreaking_amount=chipbreaking_amount  # it mutates this
             )
 
             for command in item.Path.Commands:
                 if command.Name in to_translate:
-                    drill_translated = expander.expand_command( command )
+                    drill_translated = expander.expand_command(command)
                     if drill_translated == []:
-                        raise Exception(f"Unknown error in {command}") # FIXME: we need more info for a useful user error.
+                        raise Exception(
+                            f"Unknown error in {command}"
+                        )  # FIXME: we need more info for a useful user error.
 
                     # machine_state should be correct
-                    translated.extend( drill_translated )
+                    translated.extend(drill_translated)
                 else:
-                    machine_state.addCommand( command )
+                    machine_state.addCommand(command)
                     translated.append(command)
 
             item.Path = Path.Path(translated)
@@ -1487,7 +1496,7 @@ class PostProcessor:
         gcode_lines.extend(pre_job_lines)
         return gcode_lines
 
-    def _item_pre_block(self, item) -> None|list[str]|list[Path.Command]:
+    def _item_pre_block(self, item) -> None | list[str] | list[Path.Command]:
         """Emit pre-block None|[str]|[Path.Command] for a postable item based on its type.
 
         Handles tool_controller, fixture, and operation item types.
@@ -1520,10 +1529,10 @@ class PostProcessor:
         if item.item_type == "str":
 
             # "gcode" could be in there, so our state is invalid
-            self.machine_state.setState( {k:None for k in MachineState.Tracked} )
+            self.machine_state.setState({k: None for k in MachineState.Tracked})
 
             # append the output & done
-            output_lines.extend( item.data["str"].split("\n") )
+            output_lines.extend(item.data["str"].split("\n"))
 
             return
 
@@ -1544,11 +1553,7 @@ class PostProcessor:
                     in_rotary_group = False
 
                 # we need Path.Command w/full params for MachineState
-                was_cmd = Path.Command(
-                    cmd.Name,
-                    cmd.Parameters,
-                    cmd.Annotations
-                )
+                was_cmd = Path.Command(cmd.Name, cmd.Parameters, cmd.Annotations)
 
                 # cmd may no longer have some/all parameters after this
                 cmd = self._suppress_redundant_axes_words(cmd)
@@ -1556,15 +1561,19 @@ class PostProcessor:
                 try:
                     gcode = self.convert_command_to_gcode(cmd)
                 except Exception as e:
-                    raise Exception(f"During '{item.item_type}' item '{item.label}', gcode[{cmd_i}]: {cmd}") from e
+                    raise Exception(
+                        f"During '{item.item_type}' item '{item.label}', gcode[{cmd_i}]: {cmd}"
+                    ) from e
 
                 # NB: .machine_state can only reflect Path.Command's
                 #     subclasses must update it if necessary
                 # NB: and can NOT reflect gcode in string blocks (e.g. safety_block, etc.)
                 try:
-                    self.machine_state.addCommand( was_cmd )
+                    self.machine_state.addCommand(was_cmd)
                 except Exception as e:
-                    raise Exception(f"During '{item.item_type}' {item.label}, command [{cmd_i}]: {cmd}") from e
+                    raise Exception(
+                        f"During '{item.item_type}' {item.label}, command [{cmd_i}]: {cmd}"
+                    ) from e
 
                 # FIXME: remove, redundant, add to _filter_for_items
                 if cmd.Name in ("M6", "M06"):
@@ -1587,13 +1596,13 @@ class PostProcessor:
                 pass
 
             # FIXME: silent consumption of coding errors
-            #except (ValueError, AttributeError) as e:
+            # except (ValueError, AttributeError) as e:
             #    Path.Log.debug(f"Skipping command {cmd.Name}: {e}")
 
         if in_rotary_group:
             output_lines.extend(self._get_property_lines("post_rotary_move"))
 
-    def _item_post_block(self, item) -> None|list[str]|list[Path.Command]:
+    def _item_post_block(self, item) -> None | list[str] | list[Path.Command]:
         """Emit post-block None|[str]|[Path.Command] for a postable item based on its type.
 
         Handles tool_controller, fixture, and operation item types.
@@ -1653,12 +1662,11 @@ class PostProcessor:
     def _collect_trailing_lines(self) -> str:
         """post_job and postamble lines for a gcode section."""
         lines = []
-        if l:=self._get_property_lines("post_job"):
-            lines.append( self._smart_postable("Post: post_job",l) )
-        if l:=self._get_property_lines("postamble"):
-            lines.append(self._smart_postable("Post: postamble", l) )
+        if l := self._get_property_lines("post_job"):
+            lines.append(self._smart_postable("Post: post_job", l))
+        if l := self._get_property_lines("postamble"):
+            lines.append(self._smart_postable("Post: postamble", l))
         return lines
-
 
     def _collect_bcnc_postamble(self) -> None:
         """Append bCNC postamble after the last section, just before safety_block
@@ -1668,72 +1676,76 @@ class PostProcessor:
         tracking (future work).
         """
         cleaned = None
-        if (
-            hasattr(self, "_bcnc_postamble_commands")
-            and self._bcnc_postamble_commands is not None
-        ):
+        if hasattr(self, "_bcnc_postamble_commands") and self._bcnc_postamble_commands is not None:
             Path.Log.debug(
                 f"Processing {len(self._bcnc_postamble_commands)}" " bCNC postamble commands"
             )
             if self._bcnc_postamble_commands:
-                cleaned = [ c for c in self._bcnc_postamble_commands if c is not None ]
+                cleaned = [c for c in self._bcnc_postamble_commands if c is not None]
         else:
             Path.Log.debug("No bCNC postamble commands to process")
 
         return cleaned
 
-    def _tool_change_filter(self, item: Postable): # -> None|[str]|[Path.Command]:
+    def _tool_change_filter(self, item: Postable):  # -> None|[str]|[Path.Command]:
         """Suppress tool-changes if option is on.
         See _filter_item()
         """
-        if item.item_type == 'tool_controller':
+        if item.item_type == "tool_controller":
             allow = self._machine.processing.tool_change
             if allow is None or allow is False:
                 tool_num = item.data["tool_number"]
-                return [ Path.Command(f"(Tool change suppressed: M6 T{tool_num})") ]
+                return [Path.Command(f"(Tool change suppressed: M6 T{tool_num})")]
 
         return None
 
-    def _filter_item(self, item: Postable): # -> None|[str]|[Path.Command]:
+    def _filter_item(self, item: Postable):  # -> None|[str]|[Path.Command]:
         """Runs the built in list of filter predicates in _filter().
-            We, and each predicate, returns:
-                None : leave item in place
-                [] : drop item
-                [str]|[Path.Command] : replace item, preferably with just a comment
-            The first predicate that returns not None
-                has it's result returned.
-            Subclasses can override, typically doing their predicates before or after ours.
+        We, and each predicate, returns:
+            None : leave item in place
+            [] : drop item
+            [str]|[Path.Command] : replace item, preferably with just a comment
+        The first predicate that returns not None
+            has it's result returned.
+        Subclasses can override, typically doing their predicates before or after ours.
         """
-        for pred in (
-            self._tool_change_filter,
-        ):
+        for pred in (self._tool_change_filter,):
             rez = pred(item)
             if rez is not None:
                 return rez
         return None
 
-    def _smart_postable(self, label:str, contents: str|list[str]|Path.Command|list[Path.Command] ) -> Postable:
+    def _smart_postable(
+        self, label: str, contents: str | list[str] | Path.Command | list[Path.Command]
+    ) -> Postable:
         """Makes a Postable with the right kind of args and item_type
-            for the supported inputs
+        for the supported inputs
         """
-        if isinstance( contents, str ):
-            args = { "item_type" : "str", "data" : {"str": contents}, "path":None, "source":None }
-        elif isinstance( contents, Path.Command ):
-            args = { "item_type" : "command", "path" : Path.Path( [contents] ), "source":None}
-        elif isinstance( contents[0], str ):
-            args = { "item_type" : "str", "data" : {"str": "\n".join(contents)}, "path":None, "source":None }
-        elif isinstance( contents[0], Path.Command ):
-            args = { "item_type" : "command", "path" : Path.Path( contents ), "source":None}
+        if isinstance(contents, str):
+            args = {"item_type": "str", "data": {"str": contents}, "path": None, "source": None}
+        elif isinstance(contents, Path.Command):
+            args = {"item_type": "command", "path": Path.Path([contents]), "source": None}
+        elif isinstance(contents[0], str):
+            args = {
+                "item_type": "str",
+                "data": {"str": "\n".join(contents)},
+                "path": None,
+                "source": None,
+            }
+        elif isinstance(contents[0], Path.Command):
+            args = {"item_type": "command", "path": Path.Path(contents), "source": None}
         else:
-            raise Exception(f"Can't smartly make a Postable for label '{label}'\n\tfor contents: {contents}")
+            raise Exception(
+                f"Can't smartly make a Postable for label '{label}'\n\tfor contents: {contents}"
+            )
 
-        return Postable( label=label, **args )
+        return Postable(label=label, **args)
 
     def _filter_for_items(self, postables):
         """Remove/Replace items as wanted
         Returns a new list of postables
         """
-        filter_ct = 0 # need a unique label
+        filter_ct = 0  # need a unique label
         new_sections = []
         for section_name, sublist in postables:
             new_sublist = []
@@ -1742,7 +1754,7 @@ class PostProcessor:
                 # None means leave alone
                 # [] means drop
                 # [str|Path.Command] means replace
-                replace  = self._filter_item(item)
+                replace = self._filter_item(item)
 
                 if replace is None:
                     new_sublist.append(item)
@@ -1755,16 +1767,19 @@ class PostProcessor:
                         continue
                     else:
                         new_sublist.append(
-                            self._smart_postable(f"Post: {section_name} {item.item_type} {item.label}{filter_ct} filtered", replace)
+                            self._smart_postable(
+                                f"Post: {section_name} {item.item_type} {item.label}{filter_ct} filtered",
+                                replace,
+                            )
                         )
 
-            new_sections.append( (section_name, new_sublist.copy()) )
+            new_sections.append((section_name, new_sublist.copy()))
 
         return new_sections
 
     def _add_per_item_blocks(self, postables):
         """Insert item_pre_block before, and item_post_block after it's item"""
-        pre_ct = 0 # pre-blocks need a unique label
+        pre_ct = 0  # pre-blocks need a unique label
         post_ct = 0
         new_sections = []
         for section_name, sublist in postables:
@@ -1774,7 +1789,10 @@ class PostProcessor:
                 if pre:
                     pre_ct += 1
                     new_sublist.append(
-                        self._smart_postable(f"Post: {section_name} {item.item_type} {item.label} pre-block{pre_ct}", pre)
+                        self._smart_postable(
+                            f"Post: {section_name} {item.item_type} {item.label} pre-block{pre_ct}",
+                            pre,
+                        )
                     )
 
                 new_sublist.append(item)
@@ -1783,16 +1801,19 @@ class PostProcessor:
                 if post:
                     post_ct += 1
                     new_sublist.append(
-                        self._smart_postable(f"Post: {section_name} {item.item_type} {item.label} post-block{post_ct}", post)
+                        self._smart_postable(
+                            f"Post: {section_name} {item.item_type} {item.label} post-block{post_ct}",
+                            post,
+                        )
                     )
 
-            new_sections.append( (section_name, new_sublist.copy()) )
+            new_sections.append((section_name, new_sublist.copy()))
 
         return new_sections
 
-    def _suppress_redundant_axes_words(self, command : Path.Command):
+    def _suppress_redundant_axes_words(self, command: Path.Command):
         """example of an optimization in Path.Command world
-            Can not operate on strings from blocks
+        Can not operate on strings from blocks
         """
 
         # self.machine_state is being tracked
@@ -1800,11 +1821,22 @@ class PostProcessor:
         Actionable = {
             # These should have no side-effects (cf. a drill-cycle)
             # And not have hidden state (cf. plasma's turn off on -Z)
-            "G0", "G1", "G2", "G3",
-            "G20", "G21",
+            "G0",
+            "G1",
+            "G2",
+            "G3",
+            "G20",
+            "G21",
             "G43",
             *Constants.GCODE_FIXTURES,
-            "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", # m1 could have side effects.
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M7",
+            "M8",
+            "M9",  # m1 could have side effects.
         }
         Axes = "XYZABCF"
 
@@ -1814,7 +1846,14 @@ class PostProcessor:
         if not command.Name in Actionable:
             return command
 
-        remove_params = { p for p,v in self.machine_state.getState().items() if p in Axes and v is not None and p in command.Parameters and v == command.Parameters[p] }
+        remove_params = {
+            p
+            for p, v in self.machine_state.getState().items()
+            if p in Axes
+            and v is not None
+            and p in command.Parameters
+            and v == command.Parameters[p]
+        }
         if remove_params:
             # G1/G0 F fixup
             if command.Name == "G0":
@@ -1826,8 +1865,8 @@ class PostProcessor:
 
             new_command = Path.Command(
                 command.Name,
-                { p:v for p,v in command.Parameters.items() if p not in remove_params },
-                command.Annotations
+                {p: v for p, v in command.Parameters.items() if p not in remove_params},
+                command.Annotations,
             )
             return new_command
         else:
@@ -1835,28 +1874,39 @@ class PostProcessor:
 
     def _remove_redundant_commands(self, postables):
         """example of an optimization in Path.Command world
-            Can not operate on strings from blocks
+        Can not operate on strings from blocks
         """
         Actionable = {
             # These should have no side-effects (cf. a drill-cycle)
             # And not have hidden state (cf. plasma's turn off on -Z)
-            "G0", "G1", "G2", "G3",
-            "G20", "G21",
+            "G0",
+            "G1",
+            "G2",
+            "G3",
+            "G20",
+            "G21",
             "G43",
             *Constants.GCODE_FIXTURES,
-            "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", # m1 could have side effects.
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M7",
+            "M8",
+            "M9",  # m1 could have side effects.
         }
 
         if self._machine.output.duplicates.commands:
             return
 
-        machine_state = MachineState( {k:None for k in MachineState.Tracked} )
-        last_command = Path.Command() # empty
+        machine_state = MachineState({k: None for k in MachineState.Tracked})
+        last_command = Path.Command()  # empty
         for section_name, sublist in postables:
             for item in sublist:
                 if item.item_type == "str":
                     # "gcode" could be in there, so our state is invalid
-                    machine_state.setState( {k:None for k in MachineState.Tracked} )
+                    machine_state.setState({k: None for k in MachineState.Tracked})
                     last_command = Path.Command
 
                 if item.path:
@@ -1873,7 +1923,7 @@ class PostProcessor:
                             continue
 
                         machine_state.addCommand(cmd)
-                        new_commands.append( cmd )
+                        new_commands.append(cmd)
                         if not cmd.Name.startswith("("):
                             last_command = cmd
 
@@ -1881,27 +1931,21 @@ class PostProcessor:
 
     def _collect_frontmatter(self) -> [Postable]:
         """front-matter for each section
-            Each Postable might be 'str' or 'command'
+        Each Postable might be 'str' or 'command'
         """
         front_matter = []
 
         preamble_lines = self._collect_preamble_lines()
         if preamble_lines:
-            front_matter.append(
-                self._smart_postable("Post: preamble", preamble_lines)
-            )
+            front_matter.append(self._smart_postable("Post: preamble", preamble_lines))
 
         unit_command = self._collect_unit_command()
         if unit_command:
-            front_matter.append(
-                self._smart_postable("Post: unit", unit_command)
-            )
+            front_matter.append(self._smart_postable("Post: unit", unit_command))
 
         pre_job_lines = self._collect_pre_job_lines()
         if pre_job_lines:
-            front_matter.append(
-                self._smart_postable("Post: pre_job", pre_job_lines)
-            )
+            front_matter.append(self._smart_postable("Post: pre_job", pre_job_lines))
 
         return front_matter
 
@@ -1924,43 +1968,45 @@ class PostProcessor:
 
             header_commands = self._header_object_to_commands(gcodeheader)
             if header_commands:
-                new_sublist.append( self._smart_postable("Post: header", self._header_object_to_commands(gcodeheader)) )
+                new_sublist.append(
+                    self._smart_postable(
+                        "Post: header", self._header_object_to_commands(gcodeheader)
+                    )
+                )
 
-            new_sublist.extend( frontmatter )
+            new_sublist.extend(frontmatter)
 
             new_sublist += sublist
-            new_sections.append( ( section_name, new_sublist.copy() ) )
+            new_sections.append((section_name, new_sublist.copy()))
         return new_sections
 
     def _append_endmatter(self, postables, endmatter):
         """Append endmatter at each section"""
         for section_name, sublist in postables:
-            sublist.extend( endmatter )
+            sublist.extend(endmatter)
 
-    def _append_bcnc_postamble(self, postables ):
+    def _append_bcnc_postamble(self, postables):
         """at section[-1] only, after all other items"""
         if not postables:
             return
-        if commands:=self._bcnc_postamble_commands:
-            _,sublist = postables[-1]
+        if commands := self._bcnc_postamble_commands:
+            _, sublist = postables[-1]
             bcnc_postable = self._smart_postable("Post: bcnc postamble", commands)
-            sublist.append( bcnc_postable )
-
+            sublist.append(bcnc_postable)
 
     def _add_safety_block(self, postables):
         """at section[0] only, before other items"""
         if not postables:
             return
-        if safety_lines:=self._get_property_lines("safetyblock"):
+        if safety_lines := self._get_property_lines("safetyblock"):
             bcnc_postable = self._smart_postable("Post: safetyblock", safety_lines)
             _, sublist = postables[0]
             sublist.insert(0, bcnc_postable)
 
-
     def _filter_comments(self, postables):
         """Remove comments if unwanted"""
         if getattr(getattr(self._machine.output, "comments", None), "enabled", True):
-                return
+            return
 
         # FIXME: don't operate on header, safety, etc
         for section_name, sublist in postables:
@@ -1971,35 +2017,40 @@ class PostProcessor:
                     ]
                     item.path = Path.Path(new_commands)
 
-
     def _convert_job_sections(self, postables):
         """Convert each section to output-code"""
 
         # We do NOT start at axis 0, we start undefined
-        self.machine_state = MachineState( {k:None for k in MachineState.Tracked} )
+        self.machine_state = MachineState({k: None for k in MachineState.Tracked})
 
-        job_sections = [] # output chunks
+        job_sections = []  # output chunks
         for section_name, sublist in postables:
-            #print(f"#-- Section '{section_name}'")
+            # print(f"#-- Section '{section_name}'")
 
             output_lines = []
 
             # FIXME: inclusion logic
-            #gcode_lines = self._build_section_prefix(
+            # gcode_lines = self._build_section_prefix(
             #    header_lines, preamble_lines, unit_command, pre_job_lines
-            #)
+            # )
 
             seen_items = set()
             for item_i, item in enumerate(sublist):
                 # DEBUG
-                #print(f"#----  Postable <{item.label}> {item.item_type}: {item}")
-                if item.path and len(item.path.Commands) < 10: # DEBUG
-                    paths = [i.toGCode() for i in item.path.Commands] if item.path and item.path.Commands else []
-                    #print(f"#--     paths {paths}")
+                # print(f"#----  Postable <{item.label}> {item.item_type}: {item}")
+                if item.path and len(item.path.Commands) < 10:  # DEBUG
+                    paths = (
+                        [i.toGCode() for i in item.path.Commands]
+                        if item.path and item.path.Commands
+                        else []
+                    )
+                    # print(f"#--     paths {paths}")
 
                 if item.label in seen_items:
-                    Path.Log.debug( f"Internal: Postables, in a section ('{section_name}'), should have unique .label. Saw .label twice <{item.label}>. Second looks like '{item.item_type}': {item}")
-                seen_items.add( item.label )
+                    Path.Log.debug(
+                        f"Internal: Postables, in a section ('{section_name}'), should have unique .label. Saw .label twice <{item.label}>. Second looks like '{item.item_type}': {item}"
+                    )
+                seen_items.add(item.label)
 
                 # NB: We are not in pure Path.Command world anymore
                 # Parameters (axis) might have been made redundant
@@ -2022,7 +2073,7 @@ class PostProcessor:
             if output_string:
                 job_sections.append((section_name, output_string))
 
-        self.machine_state = None # FIXME: with machine_state...
+        self.machine_state = None  # FIXME: with machine_state...
         return job_sections
 
     def export2(self) -> Union[None, GCodeSections]:
@@ -2064,9 +2115,9 @@ class PostProcessor:
         # ===== STAGE 2: COMMAND EXPANSION =====
         # We want to collect header-info before any more changes
         # used later to insert actual header into each section
-        gcodeheader = self._collect_header_info(postables) # a _HeaderBuilder
+        gcodeheader = self._collect_header_info(postables)  # a _HeaderBuilder
 
-        self._expand_translate_drill_cycles(postables) # FIXME: redundant now, but check "if"
+        self._expand_translate_drill_cycles(postables)  # FIXME: redundant now, but check "if"
         self._expand_canned_cycles(postables)
         self._expand_split_arcs(postables)
         self._expand_spindle_wait(postables)
@@ -2089,25 +2140,25 @@ class PostProcessor:
         self._filter_comments(postables)
 
         frontmatter = self._collect_frontmatter()
-        postables = self._prefix_header_and_frontmatter( postables, gcodeheader, frontmatter)
+        postables = self._prefix_header_and_frontmatter(postables, gcodeheader, frontmatter)
 
-        endmatter = self._collect_trailing_lines() # FIXME: test
-        self._append_endmatter( postables, endmatter )
+        endmatter = self._collect_trailing_lines()  # FIXME: test
+        self._append_endmatter(postables, endmatter)
 
         self._remove_redundant_commands(postables)
 
         # all appending must be done, so:
-        self._append_bcnc_postamble( postables ) # section[-1] only, after all other items
+        self._append_bcnc_postamble(postables)  # section[-1] only, after all other items
 
         # all prefixing must be done, so:
-        self._add_safety_block(postables) # section[0] only, before other items
+        self._add_safety_block(postables)  # section[0] only, before other items
 
         # Add line-numbers to all Path.Command's (if option is on)
         self._add_line_numbers(postables)
 
         # FIXME: post to gcode processors: pre-output
 
-        job_sections = self._convert_job_sections( postables )
+        job_sections = self._convert_job_sections(postables)
 
         all_job_sections.extend(job_sections)
 
@@ -2123,12 +2174,14 @@ class PostProcessor:
             Path.Log.error(f"Remote posting failed: {e}")
 
         # Only have to do line_ending in one place
-        line_ending = getattr(getattr(self._machine.output, "formatting", None),"end_of_line_chars", None)
+        line_ending = getattr(
+            getattr(self._machine.output, "formatting", None), "end_of_line_chars", None
+        )
         if line_ending and line_ending != "\n":
-            all_job_sections = [ 
-                (section_name, section.replace("\n", line_ending) )
-                for section_name, section in all_job_sections 
-                ]
+            all_job_sections = [
+                (section_name, section.replace("\n", line_ending))
+                for section_name, section in all_job_sections
+            ]
 
         return all_job_sections
 
@@ -2430,7 +2483,8 @@ class PostProcessor:
                 return super()._convert_drill_cycle(command)
         """
         WHERE = False
-        if WHERE: print(f"#-- convert_command_to_gcode {command}")
+        if WHERE:
+            print(f"#-- convert_command_to_gcode {command}")
 
         if False:
             print(  # DEBUG
@@ -2439,7 +2493,7 @@ class PostProcessor:
                 else f"<NO _machine in {self.__class__.__name__}>"
             )
 
-        if not command.Name: # DEBUG
+        if not command.Name:  # DEBUG
             raise Exception("No command.Name")
 
         # Validate command is supported
@@ -2453,10 +2507,7 @@ class PostProcessor:
                 + Constants.GCODE_NON_CONFORMING
             )
 
-        if (
-            command.Name not in supported
-            and not command.Name.startswith("(")
-        ):
+        if command.Name not in supported and not command.Name.startswith("("):
             raise ValueError(f"Unsupported command: {command.Name}")
 
         # Dispatch to appropriate hook method based on command type
@@ -2639,7 +2690,7 @@ class PostProcessor:
             feed_value = _convert_axis_param(feed_value)
 
             # There are actually oddball controls that use {units}/second feedrate.
-            if not ( self._machine and hasattr(self._machine, "feedrate_per_second") ):
+            if not (self._machine and hasattr(self._machine, "feedrate_per_second")):
                 # Convert from mm/sec to mm/min (multiply by 60)
                 feed_value = feed_value * 60.0
 
@@ -2714,16 +2765,16 @@ class PostProcessor:
 
         # line numbers
         if params.get("N", None) is not None:
-            prefix = getattr(getattr(self._machine.output, "formatting", None), "line_number_prefix", "N")
-            command_line.append( f"{prefix}{ int(params['N']):d}" )
+            prefix = getattr(
+                getattr(self._machine.output, "formatting", None), "line_number_prefix", "N"
+            )
+            command_line.append(f"{prefix}{ int(params['N']):d}")
 
         # GCode name
         command_line.append(command_name)
 
         # Format parameters with clean, stateless implementation
-        parameter_order = self.values.get(
-            "PARAMETER_ORDER", Constants.PARAMETER_ORDER
-        )
+        parameter_order = self.values.get("PARAMETER_ORDER", Constants.PARAMETER_ORDER)
 
         for parameter in parameter_order:
             if parameter in params:
@@ -2745,7 +2796,9 @@ class PostProcessor:
         # Handle tool length offset (G43) suppression
         # FIXME: lift to stage 2
         if command_name in ("G43",):
-            if not self.values.get("OUTPUT_TOOL_LENGTH_OFFSET", True): # FIXME: lift to suppress time
+            if not self.values.get(
+                "OUTPUT_TOOL_LENGTH_OFFSET", True
+            ):  # FIXME: lift to suppress time
                 # Tool length offset disabled - suppress G43 command
                 return None
 
@@ -2889,7 +2942,6 @@ class WrapperPost(PostProcessor):
         self._units = "Metric" if getattr(self.script_module, "UNITS", "G21") == "G21" else "Inch"
         self._tooltip = getattr(self.script_module, "TOOLTIP", "No tooltip provided")
         self._tooltipargs = getattr(self.script_module, "TOOLTIP_ARGS", [])
-
 
     def export(self):
         """Dynamically reload the module for the export to ensure up-to-date usage."""

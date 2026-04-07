@@ -194,7 +194,7 @@ G54
         gcode = self.post.export()[0][1]
         # print(f"--------{nl}{gcode}--------{nl}")
         expected = r"^N\d+ +G0 X10.000 Y20.000 Z30.000"
-        self.assertTrue( re.search(expected, gcode, flags=re.M), f"Expected {expected} in\n{gcode}")
+        self.assertTrue(re.search(expected, gcode, flags=re.M), f"Expected {expected} in\n{gcode}")
 
     def test030(self):
         """
@@ -254,7 +254,7 @@ G54
         # print(f"--------{nl}{gcode}--------{nl}")
         result = gcode.splitlines()
         expected = "G0 X0.39 Y0.79 Z1.18"
-        self.assertIn(expected,result)
+        self.assertIn(expected, result)
 
     def test060(self):
         """
@@ -273,7 +273,9 @@ G54
         # print(f"--------{nl}{gcode}--------{nl}")
         result = gcode.splitlines()
         expected = "X10.000 Y30.000 Z30.000"
-        self.assertEqual(len([l for l in result if l==expected]),1,"Only expected one G0 X10..., in\n{gcode}")
+        self.assertEqual(
+            len([l for l in result if l == expected]), 1, "Only expected one G0 X10..., in\n{gcode}"
+        )
 
     def test070(self):
         """
@@ -309,12 +311,16 @@ G54
         gcode = self.post.export()[0][1]
         print(f"--------{nl}{gcode}--------{nl}")
         split_gcode = gcode.splitlines()
-        self.assertIn("""
+        self.assertIn(
+            """
 M5
 M6 T2
 G43 H2
 M3 S3000
-""", gcode, f"for\n{gcode}")
+""",
+            gcode,
+            f"for\n{gcode}",
+        )
 
         # suppress TLO
         self.job.PostProcessorArgs = "--no-header --no-tlo --no-show-editor"

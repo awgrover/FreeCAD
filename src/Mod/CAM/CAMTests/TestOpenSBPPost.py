@@ -37,7 +37,6 @@ from Path.Post.Processor import PostProcessorFactory
 from Machine.models.machine import Machine, Toolhead, ToolheadType, OutputUnits
 from Path.Base.MachineState import MachineState
 
-
 Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
 Path.Log.trackModule(Path.Log.thisModule())
 
@@ -50,6 +49,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
     OpenSBP uses native ShopBot commands instead of standard G-code.
     These tests verify command conversion for the major command categories.
     """
+
     _first_time = True
 
     @classmethod
@@ -297,10 +297,10 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
 
         # arc's need a previous Z, so psuedo track Z
-        self.post.machine_state = MachineState( {k:None for k in MachineState.Tracked} )
-        self.post.machine_state.addCommand( Path.Command("G0", {"Z": 0}) )
+        self.post.machine_state = MachineState({k: None for k in MachineState.Tracked})
+        self.post.machine_state.addCommand(Path.Command("G0", {"Z": 0}))
 
-        command = Path.Command("G2", {"F":50, "X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -5.0})
+        command = Path.Command("G2", {"F": 50, "X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -5.0})
 
         result = self.post._convert_arc_move(command)
 
@@ -312,10 +312,10 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """Helix output must not contain G2 or G3."""
 
         # arc's need a previous Z, so psuedo track Z
-        self.post.machine_state = MachineState( {k:None for k in MachineState.Tracked} )
-        self.post.machine_state.addCommand( Path.Command("G0", {"Z": 0}) )
+        self.post.machine_state = MachineState({k: None for k in MachineState.Tracked})
+        self.post.machine_state.addCommand(Path.Command("G0", {"Z": 0}))
 
-        command = Path.Command("G2", {"F":50, "X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -1.0})
+        command = Path.Command("G2", {"F": 50, "X": 10.0, "Y": 0.0, "I": 5.0, "J": 0.0, "Z": -1.0})
 
         result = self.post._convert_arc_move(command)
         self.assertNotIn("G2", result)
@@ -443,10 +443,13 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
         for fixture in ["G54"]:
             command = Path.Command(fixture, {})
-            self.profile_op.Path = Path.Path( [command] )
+            self.profile_op.Path = Path.Path([command])
             result = self.post.export2()[0][1]
             # Can appear in comments
-            self.assertFalse( re.search(r'^N\d+ +'+fixture, result, flags=re.M), f"{fixture} should be suppressed")
+            self.assertFalse(
+                re.search(r"^N\d+ +" + fixture, result, flags=re.M),
+                f"{fixture} should be suppressed",
+            )
 
     # -------------------------------------------------------------------------
     # Unit conversion (imperial output)
@@ -493,10 +496,12 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         # basic stuff, + something that is shopbot specific
         # FIXME: all Test*Post should do this
         # FIXME: a test-util function for gcode-name to arbitrary-good-gcode, to generate this list from Constants, etc
-        handled_gcode = [ Path.Command(g) for g in
-                # trying to list all handled gcodes, is checked below against opensbp list
-                (
-                "G0X1Y2Z3F110 G1X4Y5Z6F50 " # with F
+        handled_gcode = [
+            Path.Command(g)
+            for g in
+            # trying to list all handled gcodes, is checked below against opensbp list
+            (
+                "G0X1Y2Z3F110 G1X4Y5Z6F50 "  # with F
                 "G2X7Y8I9J10 G3X11Y12I13J14 G2X7Y8I9J10Z11 G3X11Y12I13J14Z12 G4P2 "
                 "G20 G21 G38.2X1Y2Z3 G54 G92X4Y5Z6 "
                 # The drill params don't necessarily make sense in these, we just need certain params:
@@ -505,18 +510,16 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 # G85Z1R2 is simple, soon FIXME
                 "M0 M1 M3S1 M5 M6T2 M7 M8 M9 "
                 "(comment)"
-                ).split(" ")
+            ).split(" ")
         ]
 
-        self.profile_op.Path = Path.Path( handled_gcode )
+        self.profile_op.Path = Path.Path(handled_gcode)
         self.post.export2()
         self.assertTrue(True, "No Crash")
 
         # Did we cover all the opensbp_post supported gcodes?
         # remove the redundant x0n from known, we only test xn above
-        all_supported = (
-            self.post.GCodeSupported - self.post.GCodeUnsupported
-        )
+        all_supported = self.post.GCodeSupported - self.post.GCodeUnsupported
         untried = set([p for p in all_supported if not re.search(r"0\d$", p)]) - set(
             [p.Name for p in handled_gcode]
         )
@@ -532,8 +535,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 + Constants.GCODE_NON_CONFORMING
             )
             - self.post.GCodeUnsupported
-            - { "G90", "G91" } # not a Path nor Post thing
-            - { "G84", "G85", "G88", "G89" } # tapping, boring
+            - {"G90", "G91"}  # not a Path nor Post thing
+            - {"G84", "G85", "G88", "G89"}  # tapping, boring
         )
         untried = set([p for p in all_possible if not re.search(r"0\d$", p)]) - set(
             [p.Name for p in handled_gcode]
@@ -556,20 +559,28 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 # Comment, no line-numbe
                 Path.Command("(comment-line)"),
                 # shopbot, no line-number
-                Path.Command("G2", {"F":50, "X": 20.0, "Y": 1.0, "I": 5.0, "J": 0.0, "Z": -5.0}),
+                Path.Command("G2", {"F": 50, "X": 20.0, "Y": 1.0, "I": 5.0, "J": 0.0, "Z": -5.0}),
             ]
         )
         gcode = self.post.export2()[0][1]
 
         lines = gcode.split("\n")
 
-        self.assertTrue( any(l for l in lines if re.match(r'^N\d+ +G0', l) ), f"G0 is line-numbered: {gcode}")
+        self.assertTrue(
+            any(l for l in lines if re.match(r"^N\d+ +G0", l)), f"G0 is line-numbered: {gcode}"
+        )
 
         # comments (native) are not numbered
-        self.assertFalse( any(l for l in lines if "comment-line" in l and re.match(r"^N\d+", l) ), f"Native comments are not line-numbered: {gcode}")
+        self.assertFalse(
+            any(l for l in lines if "comment-line" in l and re.match(r"^N\d+", l)),
+            f"Native comments are not line-numbered: {gcode}",
+        )
 
         # shopbot native must NOT get numbered
-        self.assertFalse( any(l for l in lines if re.match(r'^N\d+ +CG,', l)), f"G2->CG (helix) and is not line-numbered: {gcode}")
+        self.assertFalse(
+            any(l for l in lines if re.match(r"^N\d+ +CG,", l)),
+            f"G2->CG (helix) and is not line-numbered: {gcode}",
+        )
 
     @unittest.expectedFailure
     def test_gcode_passthrough(self):
@@ -602,7 +613,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             [
                 Path.Command("G0", {"X": 10.0, "Y": 0.0, "Z": -1.0, "F": 500.0}),
                 # identical G01's -> elide one
-                Path.Command("G1", {"F":55, "X": 0.0, "Y": 0.0, "Z": 5.0}),
+                Path.Command("G1", {"F": 55, "X": 0.0, "Y": 0.0, "Z": 5.0}),
                 Path.Command("G1", {"X": 0.0, "Y": 0.0, "Z": 5.0}),
                 # we know shopbot must translate a helix, using a relative Z
                 # so these are identical output, but not "duplicates"
@@ -648,11 +659,15 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 
         # No bare G0/G1 move lines
         bare_move_lines = [l for l in gcode.splitlines() if re.match(r"^G[01]\b", l.strip())]
-        self.assertEqual(bare_move_lines, [], f"Unexpected bare G-code move lines: {bare_move_lines}")
+        self.assertEqual(
+            bare_move_lines, [], f"Unexpected bare G-code move lines: {bare_move_lines}"
+        )
 
         # Numbered
         numbered = [l for l in gcode.splitlines() if re.match(r"^N\d+ +G[01]", l.strip())]
-        self.assertEqual( len(numbered), 3, f"Should be 3 numbered Gn lines, saw {numbered} in\n{gcode}")
+        self.assertEqual(
+            len(numbered), 3, f"Should be 3 numbered Gn lines, saw {numbered} in\n{gcode}"
+        )
 
     def test_G4(self):
         """
@@ -660,11 +675,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
         self.post._machine.output.comments.enabled = False
         self.post._machine.output.output_header = False
-        self.profile_op.Path = Path.Path(
-            [
-                Path.Command("G4 P3")
-            ]
-        )
+        self.profile_op.Path = Path.Path([Path.Command("G4 P3")])
         gcode = self.post.export2()[0][1]
 
         self.no_unnumbered("G4", gcode.splitlines())
@@ -678,7 +689,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.post._machine.output.output_header = False
         self.profile_op.Path = Path.Path(
             [
-                Path.Command("G0 X0 Y0 Z10"), # establish Z
+                Path.Command("G0 X0 Y0 Z10"),  # establish Z
                 Path.Command("G2 X7 Y8 I9 J10 F50 Z10"),
                 Path.Command("G3 X11 Y12 I13 J14 F50 Z10"),
             ]
@@ -694,44 +705,45 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
         self.post._machine.output.comments.enabled = False
         self.post._machine.output.output_header = False
-        self.profile_op.Path = Path.Path(
-            [
-                Path.Command("G20"),
-                Path.Command("G21")
-            ]
-        )
+        self.profile_op.Path = Path.Path([Path.Command("G20"), Path.Command("G21")])
         gcode = self.post.export2()[0][1]
 
         self.no_unnumbered("G20", gcode.splitlines())
         self.no_unnumbered("G21", gcode.splitlines())
 
-    def no_unnumbered(self, gcode, lines): # FIXME: move up
+    def no_unnumbered(self, gcode, lines):  # FIXME: move up
         """Test if it has at least one, and all one of the `gcode` lines are numbered"""
-        pattern = r"^(N\d+ +)?"+gcode+r"( |$)" # N001 G01 ....
+        pattern = r"^(N\d+ +)?" + gcode + r"( |$)"  # N001 G01 ....
 
         print(f"### Unnumbed for {gcode}:\n---\n{eol.join(lines)}\n---")
 
         # at least some lines w/gcode
-        lines_with_gcode = [l for l in lines if re.match(pattern, l.strip())] # numbered/un-numbered
-        self.assertTrue( len(lines_with_gcode) >= 1, f"At least one line with {gcode} out of\n---\n{eol.join(lines)}\n---")
+        lines_with_gcode = [
+            l for l in lines if re.match(pattern, l.strip())
+        ]  # numbered/un-numbered
+        self.assertTrue(
+            len(lines_with_gcode) >= 1,
+            f"At least one line with {gcode} out of\n---\n{eol.join(lines)}\n---",
+        )
 
         # No unnumbered
-        unnumbered = [l for l in lines_with_gcode if (m:=re.match(pattern, l.strip())) and m.group(1) is None]
+        unnumbered = [
+            l
+            for l in lines_with_gcode
+            if (m := re.match(pattern, l.strip())) and m.group(1) is None
+        ]
         self.assertEqual(unnumbered, [], f"Unexpected bare G-code lines: {unnumbered}")
 
     def test_G82(self):
         """for the dwell"""
         self.profile_op.Path = Path.Path(
-            [ Path.Command(g) for g in [
-                "G98",
-                "G0 X0.0 Y0.0 Z10.0 F110",
-                "G82 X90.0 Y90.0 F59 R9.9 Z0 L2 P9"
-                ]
+            [
+                Path.Command(g)
+                for g in ["G98", "G0 X0.0 Y0.0 Z10.0 F110", "G82 X90.0 Y90.0 F59 R9.9 Z0 L2 P9"]
             ]
         )
         gcode = self.post.export2()[0][1]
 
-        
         self.assertIn("G4 ", gcode, gcode)
 
     def test_drill_cycles_translated(self):
@@ -741,28 +753,33 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         drill_codes = Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
 
         self.profile_op.Path = Path.Path(
-            [ Path.Command(g) for g in [
-                "G98",
-                "G0 X0.0 Y0.0 Z10.0 F110",
-                "(G83)",
-                "G83 X10.0 Y10.0 Z0 F100 R9.0 Q4",
-                # move +xy, move z->R, drill Z, z->R,
-                "(G81)",
-                "G81 X10.0 Y10.0 F100 R9.0 Z0 L2",
-                "G0 X1.0 Y2.0 Z10.0",
-                "(G82)",
-                "G82 X10.0 Y10.0 F100 R9.0 Z0 L2 P3",
-                "G0 X3.0 Y4.0 Z10.0 F110",
-                "(G82 w/Q)",
-                "G81 X10.0 Y10.0 F100 R9.0 Z0",
-            ]]
+            [
+                Path.Command(g)
+                for g in [
+                    "G98",
+                    "G0 X0.0 Y0.0 Z10.0 F110",
+                    "(G83)",
+                    "G83 X10.0 Y10.0 Z0 F100 R9.0 Q4",
+                    # move +xy, move z->R, drill Z, z->R,
+                    "(G81)",
+                    "G81 X10.0 Y10.0 F100 R9.0 Z0 L2",
+                    "G0 X1.0 Y2.0 Z10.0",
+                    "(G82)",
+                    "G82 X10.0 Y10.0 F100 R9.0 Z0 L2 P3",
+                    "G0 X3.0 Y4.0 Z10.0 F110",
+                    "(G82 w/Q)",
+                    "G81 X10.0 Y10.0 F100 R9.0 Z0",
+                ]
+            ]
         )
         gcode = self.post.export2()[0][1]
 
         # were they replaced?
         for drill_g in drill_codes:
             # prefix space to distinguish from comment
-            self.assertNotIn(" "+drill_g, gcode, f"Should have expanded drills, but saw {drill_g}")
+            self.assertNotIn(
+                " " + drill_g, gcode, f"Should have expanded drills, but saw {drill_g}"
+            )
 
         # did we actually produce any replacement?
 
@@ -779,8 +796,10 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         expect = """&ToolName=TC: Default Tool
 &Tool=1
 """
-        
-        self.assertIn( expect, gcode, F"In\n---{gcode}\n---" ) # FIXME: a diff-like would be much better
+
+        self.assertIn(
+            expect, gcode, f"In\n---{gcode}\n---"
+        )  # FIXME: a diff-like would be much better
 
     @unittest.expectedFailure
     def test_todo(self):
