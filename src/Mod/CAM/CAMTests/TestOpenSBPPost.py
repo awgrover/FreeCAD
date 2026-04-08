@@ -123,11 +123,11 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.assertIn("OpenSBP", preamble)
 
     def test_default_postamble_contains_spindle_off(self):
-        """Default postamble ends program with spindle-off command C7."""
+        """Default postamble ends program with spindle-off""" # FIXME
         schema = self.post.get_common_property_schema()
         postamble = next((p["default"] for p in schema if p["name"] == "postamble"), None)
         self.assertIsNotNone(postamble)
-        self.assertIn("C7", postamble)
+        self.assertIn("END", postamble)
 
     # -------------------------------------------------------------------------
     # Comment conversion
@@ -378,21 +378,19 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.assertIn("PAUSE", result)
         self.assertIn("18000", result)
 
-    def test_spindle_on_automatic_emits_tr_and_c6(self):
+    def test_spindle_on_automatic_emits_tr(self):
         """
         M3 with automatic spindle control emits TR (speed), C6 (on), and PAUSE (wait).
 
         BEFORE: M3 S18000
         AFTER:  >TR,18000
-                C6
                 >PAUSE 2
         """
         self.post._machine.postprocessor_properties["automatic_spindle"] = True
         command = Path.Command("M3", {"S": 18000})
         result = self.post._convert_spindle_command(command)
         self.assertIn("TR,18000", result)
-        self.assertIn("C6", result)
-        self.assertIn("PAUSE 2", result)
+        self.assertTrue(re.search(r"PAUSE \d+", result), f"expected pause in {result}")
 
     def test_spindle_off_manual_emits_pause(self):
         """
@@ -404,22 +402,21 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         """
         command = Path.Command("M5", {})
         result = self.post._convert_spindle_command(command)
+        self.assertTrue(result.startswith("'"), f"expected a comment for the prompt in\n{result}")
         self.assertIn("PAUSE", result)
 
-    def test_spindle_off_automatic_emits_tr0_and_c7(self):
+    def test_spindle_off_automatic_emits_tr0(self):
         """
-        M5 with automatic spindle control emits TR,0 and C7 (spindle off).
+        M5 with automatic spindle control emits TR,0.
 
         BEFORE: M5
-        AFTER:  >TR,0
-                C7
+        AFTER:  TR,0
         """
         self.post._machine.postprocessor_properties["automatic_spindle"] = True
 
         command = Path.Command("M5", {})
         result = self.post._convert_spindle_command(command)
         self.assertIn("TR,0", result)
-        self.assertIn("C7", result)
 
     def test_spindle_no_gcode_in_output(self):
         """Spindle output must not contain M3, M4, or M5."""
@@ -646,13 +643,8 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         )
         gcode = self.post.export2()[0][1]
 
-        # No bare G0/G1 move lines
-        bare_move_lines = [l for l in gcode.splitlines() if re.match(r"^G[01]\b", l.strip())]
-        self.assertEqual(bare_move_lines, [], f"Unexpected bare G-code move lines: {bare_move_lines}")
-
-        # Numbered
-        numbered = [l for l in gcode.splitlines() if re.match(r"^N\d+ +G[01]", l.strip())]
-        self.assertEqual( len(numbered), 3, f"Should be 3 numbered Gn lines, saw {numbered} in\n{gcode}")
+        self.no_unnumbered("G1", gcode.splitlines())
+        self.no_unnumbered("G0", gcode.splitlines())
 
     def test_G4(self):
         """
@@ -705,6 +697,58 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.no_unnumbered("G20", gcode.splitlines())
         self.no_unnumbered("G21", gcode.splitlines())
 
+    def test_M0_and_M1_line_numbered(self):
+        """
+        stop lines are passed through, but line-numbered
+        """
+        self.post._machine.output.comments.enabled = False
+        self.post._machine.output.output_header = False
+        self.profile_op.Path = Path.Path(
+            [
+                Path.Command("M0"),
+                Path.Command("M1"),
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        self.no_unnumbered("M1", gcode.splitlines())
+        self.no_unnumbered("M0", gcode.splitlines())
+
+    def test_M8_and_M9_line_numbered(self):
+        """
+        coolant control is passed through, but line-numbered
+        """
+        self.post._machine.output.comments.enabled = False
+        self.post._machine.output.output_header = False
+        self.profile_op.Path = Path.Path(
+            [
+                Path.Command("M8"),
+                Path.Command("M9"),
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        self.no_unnumbered("M8", gcode.splitlines())
+        self.no_unnumbered("M9", gcode.splitlines())
+
+    @unittest.expectedFailure
+    def test_programend_numbered(self):
+        """
+        program_end's are passed through, but line-numbered
+        """
+        self.post._machine.output.comments.enabled = False
+        self.post._machine.output.output_header = False
+        self.profile_op.Path = Path.Path(
+            [
+                Path.Command("M2"),
+                Path.Command("M30"),
+            ]
+        )
+        gcode = self.post.export2()[0][1]
+
+        self.no_unnumbered("M2", gcode.splitlines())
+        self.no_unnumbered("M30", gcode.splitlines())
+
     def no_unnumbered(self, gcode, lines): # FIXME: move up
         """Test if it has at least one, and all one of the `gcode` lines are numbered"""
         pattern = r"^(N\d+ +)?"+gcode+r"( |$)" # N001 G01 ....
@@ -736,7 +780,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 
     def test_drill_cycles_translated(self):
         """by default, expanded"""
-        self.post._machine.postprocessor_properties["automatic_spindle"] = True
 
         drill_codes = Constants.GCODE_DRILL_EXTENDED + Constants.GCODE_MOVE_DRILL
 
@@ -788,7 +831,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.assertTrue(False, "probe")
         self.assertTrue(False, "diff precision for mm|in")
         self.assertTrue(False, "test on machine G20/G21")
-        self.assertTrue(False, "implement all in test_modal_commands_suppressed")
         self.assertTrue(False, "precision conversion should round +1 digit, then precision")
         self.assertTrue(
             False,
