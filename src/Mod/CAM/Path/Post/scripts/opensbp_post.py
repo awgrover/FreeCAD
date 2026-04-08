@@ -76,13 +76,15 @@ class OpenSBPPost(PostProcessor):
     OpenSBP can use most gcodes (see GCodeKnow), with a few translated to opensbp
     """
 
-    # This list is specific to shopbot, do not use Mod/CAM/Constants.py
+    # This list is specific to shopbot, not from Mod/CAM/Constants.py
     # from https://shopbottools.com/wp-content/uploads/2024/01/SBG-00142-User-Guide-20150317.pdf
+    # We want to translate some of the natively-supported gcodes (e.g. M2), so we omit them here.
     # It includes commands that Operations shouldn't generate (cf. Constants.GCODE_NON_CONFORMING)
     # It may include commands that Post/Processor.py shouldn't generate (cf. Constants.GCODE_SUPPORTED and Constants.MCODE_SUPPORTED and Constants.GCODE_NON_CONFORMING)
     # Compatible should just pass-through
     GCodeNative = set(
-        "G0 G00 G1 G01 G4 G04 G20 G21 G28 G29 G38.2 G92 M0 M00 M1 M01 M2 M02 M3 M03 M5 M05 M8 M08 M9 M09 M10 M11 M30".split(
+        # M10/M11 is clamp-on/clamp-off
+        "G0 G00 G1 G01 G4 G04 G20 G21 G28 G29 G38.2 G92 M0 M00 M1 M01 M03 M5 M05 M8 M08 M9 M09 M10 M11".split(
             " "
         )
     )
@@ -104,7 +106,8 @@ class OpenSBPPost(PostProcessor):
     )
 
     # Others require translation
-    GCodeTranslate = set("G2 G02 G3 G03 G73 M6 M06 M7".split(" "))
+    # FIXME: is M2/M30 program-end supposed to be in GCODE_SUPPORTED?
+    GCodeTranslate = set("G2 G02 G3 G03 G73 M2 M02 M3 M03 M5 M05 M6 M06 M7 M30".split(" "))
     GCodeKnown = GCodeTranslate | GCodeNative | GCodeSuppressed
     if GCodeKnown & GCodeUnsupported:
         raise Exception(
@@ -142,10 +145,10 @@ class OpenSBPPost(PostProcessor):
                 prop["default"] = (
                     "'OpenSBP output from FreeCAD\n"
                     "'NOTE: In OpenSBP, M3 is a 3-axis MOVE command, NOT spindle control\n"
-                    "'Spindle control is via TR (speed) and C6/C7 (on/off) commands"
+                    "'Spindle control is via TR (speed) command"
                 )
             elif prop["name"] == "postamble":
-                prop["default"] = "C7\n'End of program"
+                prop["default"] = "END\n'End of program"
             elif prop["name"] == "supported_commands":
                 prop["default"] = "\n".join(cls.GCodeSupported)
             elif prop["name"] == "drill_cycles_to_translate":
@@ -264,7 +267,7 @@ class OpenSBPPost(PostProcessor):
 
         # FIXME: should be in Processor class
         if command.Name not in self.GCodeSupported and not command.Name.startswith("("):
-            raise ValueError(f"opensbp does not support {command.toGCode()}. Supported: {self.GCodeSupported}")
+            raise ValueError(f"opensbp does not support {command.toGCode()}. Supported: {sorted(self.GCodeSupported)}")
 
         return super().convert_command_to_gcode(command)
 
@@ -426,9 +429,9 @@ class OpenSBPPost(PostProcessor):
         if command.Name in ["M5", "M05"]:
             # Spindle off
             if has_auto_spindle:
-                return "TR,0\nC7"
+                return "TR,0"
             else:
-                return "'Turn spindle OFF manually\n>PAUSE"
+                return "'Turn spindle OFF manually\nPAUSE"
 
         # Spindle on (M3/M4)
         rpm = int(params.get("S", 0))
@@ -437,15 +440,25 @@ class OpenSBPPost(PostProcessor):
 
         if has_auto_spindle:
             # Automatic spindle control
-            output.append(f"TR,{rpm}")
-            output.append("C6")  # Start spindle
-            output.append("PAUSE 2")  # Wait for spindle to reach speed
+            formatted = self.format_parameter('S', rpm) #.rstrip('0').rstrip('.') # FIXME: example trailing zero
+            output.append(f"TR,{formatted}")
+
+            # FIXME: the default behavior is no delay unless spindle_wait is specified, default delay?
+            spindle = self._machine.get_spindle_by_index(0)
+            if not (spindle and spindle.spindle_wait > 0):
+                output.append("PAUSE 2")  # Wait for spindle to reach speed
         else:
             # Manual spindle control - prompt user
-            output.append(f"'Set spindle to {rpm} RPM and start manually")
+            output.append(f"'Set spindle to {rpm} RPM ({rpm/60}Hz) and start manually")
             output.append("PAUSE")
 
         return "\n".join(output)
+
+        def _convert_program_control(self, command: Path.Command) -> str:
+            if command.Name in (Constants.MCODE_END + Constants.MCODE_END_RESET):
+                return "END"
+            else:
+                return super()._convert_program_control(command)
 
     def _optimize_gcode(self, header_lines, gcode_lines) -> str:
         # There may be opensbp in the stream
