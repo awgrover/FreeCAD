@@ -39,13 +39,16 @@ without reimplementing the entire convert_command_to_gcode function.
 FIXME: axis-modal may have occured, use self.machine_state to recover params
 """
 
+import operator
+import math
 from typing import Any, Dict
-
-from Path.Post.Processor import PostProcessor
 
 import FreeCAD
 import Path
 import Constants
+
+from Path.Post.Processor import PostProcessor
+from Machine.models.machine import OutputUnits
 
 translate = FreeCAD.Qt.translate
 
@@ -290,9 +293,10 @@ class OpenSBPPost(PostProcessor):
         Convert arc moves (G2/G3) that change Z to OpenSBP CG command.
         Non-changing-Z is passed through as G2/G3.
 
-        OpenSBP CG format: CG,,X,Y,I,J,T,direction[,plunge]
+        OpenSBP CG format: CG,,X,Y,I,J,"T",direction[,plunge]
         where:
         - direction is 1 for CW (G2) or -1 for CCW (G3)
+        - T is literal
         - plunge is optional Z movement (relative, sign inverted)
 
         Note: ShopBot only supports arcs in XY plane with I,J offsets.
@@ -305,66 +309,128 @@ class OpenSBPPost(PostProcessor):
         machine_state_params = self.machine_state.getState()
         params.update( { p:machine_state_params[p] for p in "XYZF" if params.get(p, None) is None and machine_state_params[p] is not None} )
 
+        # notably, not R format, and no repetitions (P)
         AllowedParameters = set("XYZIJFN")
 
         if illegal := [x for x in params if x not in AllowedParameters]:
             # FIXME: what is the right way to report error? How to include context?
             raise ValueError(
-                f"Only XYZIFJN allowed for a {command.Name}, saw {illegal} in {command}"
+                f"Only {''.join(AllowedParameters)} allowed for {command.Name}, saw {illegal} in {command}"
             )
         if missing := [x for x in AllowedParameters-{'N'} if x not in params]:
             raise ValueError(
                 f"Requires XYZIFJ for a {command.Name}, missing {missing} in {command} (and in machine-state {self.machine_state})"
             )
 
-        # Leave as G-Code
-        if params["Z"] == self.machine_state.Z:
+        RequiredState = "XYZ"
+        if modal_missing := [p for p in RequiredState if self.machine_state.getState()[p] is None ]:
+            raise ValueError(f"Helixes require a previous {''.join(modal_missing)} (from some movement) for {command}")
+
+
+        # GCODE if no dZ
+
+        if params["Z"] == self.machine_state.Z: # nb: works ok if Z is omitted, and state.Z is None (never seen)
             return super()._convert_arc_move(command)
 
-        # Get unit conversion function
-        def get_value(val):
-            if self._machine and hasattr(self._machine, "output"):
-                from Machine.models.machine import OutputUnits
 
-                if self._machine.output.units == OutputUnits.IMPERIAL:
-                    return val / 25.4
-            return val
+        # HELIX, requires opensbp CG, command
 
-        # Determine direction
+        # We'll work in internal mm units till the final stringification
+
         direction = "1" if command.Name in ["G2", "G02"] else "-1"
-
-        # Extract arc parameters
-        # params can be modal (except IJZ)
-        param_keys = list("XY")
-        param_values = [
-            get_value(params.get(p, getattr(self.machine_state, p))) for p in param_keys
-        ]
-        print(f"CG params: {param_values}")
-        required = [p for i, p in enumerate(param_keys) if param_values[i] is None]
-        required += [p for p in "IJZ" if params.get(p, None) is None]
-        if required:
-            raise ValueError(
-                f"Helixes require {''.join(param_keys)} (including previous modal values), missing {required} in {command}"
-            )
-
-        x_val, y_val = param_values
+        x_val, y_val = params["X"], params["Y"]
         i_val, j_val = params["I"], params["J"]
         z_val = params["Z"]
+        plunge = self.machine_state.Z - z_val  # Relative, inverted sign
 
         output = []
+
+        def arc_length_3d(center, start, end, clockwise):
+            # FIXME: is there an existing fn for this?
+            """center, start, end: (x, y, z) tuples
+            clockwise: True for G2, False for G3
+            Returns length-in-xy-plane, total_length
+            """
+
+            cx, cy, cz = center
+            sx, sy, sz = start
+            ex, ey, ez = end
+
+            # ---- XY arc angle ----
+
+            a0 = math.atan2(sy - cy, sx - cx)
+            a1 = math.atan2(ey - cy, ex - cx)
+
+            dtheta = abs(a1 - a0)
+
+            r = math.hypot(sx - cx, sy - cy)
+
+            arc_xy = abs(r * dtheta)
+
+            # ---- total length is just as-if a triangle of a=arc_yx, b=dz, c=hypot
+            dz = ez - sz
+
+            # ---- true helical arc length ----
+            result = (arc_xy, math.hypot(arc_xy, dz))
+            return result
+
+        def calculate_arc_speed( command_name, command_params, last_position ):
+            """Have to project F onto XY plane, and Z axis
+            last_position is some dict with X,Y,Z,F
+            command_params is some dict with XYZIJF
+
+            return vs-speed_command
+            """
+            # On at least some shopbots, issuing a VS with a Z value will stutter
+            # But, it seems that a CG with plunge also stutters
+            # So, we issue VS...\nCG... anyway
+            # It is possible to track the VS(XY,Z) and not issue the VS if no change
+            # would require machine_state that holds VS(XY,Z), and only tracks runs of VS
+            #   ( any other command invalidates VS(XY,Z) )
+            # FIXME: ABC speeds not handled
+            
+            # we use vectors [x,y,z] so we can `map` (instead of a dict)
+            start_position = [ last_position[a] for a in "XYZ" ]
+            center_offset = [ command_params[a] for a in "IJ" ]
+            center_offset.append(0) # Z offset, as if K=0
+            center = list(map(operator.add, start_position, center_offset))
+            end_position = [ command_params[a] for a in "XYZ" ]
+
+            # 
+            z_distance = abs(start_position[2] - end_position[2])
+            xy_distance, total_distance = arc_length_3d(
+                center,
+                start_position,
+                end_position,
+                command.Name == "G02",  # is it clockwise
+            )
+
+            # Nothing to do
+            if abs(xy_distance) < 1e-5:
+                return None
+
+            distances_for_speed = [xy_distance, z_distance]
+
+            # now we just need proportion of F in xy, and proportion of F in Z
+            vs_speeds = [ command_params['F']/d for d in distances_for_speed ]
+
+            # opensbp native commands are units/sec, and Path.Command is too
+            # but opensbp gcode is units/min (as is self._machine.feedrate_per_second)
+            # format_parameter is going to *60 so we have to /60
+            return f"VS,{self.format_parameter('F', vs_speeds[0]/60)},{self.format_parameter('F', vs_speeds[1]/60)}"
+
+        speed_command = calculate_arc_speed( command.Name, params, last_position = self.machine_state.getState() )
+        if speed_command:
+            output.append( speed_command )
 
         # Helical arc - need to calculate plunge
         # Get current Z from modal state (default to 0 if not set)
         current_z = self.machine_state.Z
-        if current_z is None:
-            # FIXME: we could actually generate a calculate based on machine's actual Z variable...
-            raise ValueError(f"Helixes require a previous Z (from some movement) for {command}")
-        plunge = get_value(current_z - z_val)  # Relative, inverted sign
 
         # Set move speed if feed rate is specified
         # F is in mm/sec (FreeCAD base units); ShopBot also expects per-second.
         if "F" in params:
-            speed = get_value(params["F"])
+            speed = params["F"]
             # Only output if speed changed
             # FIXME: project xy|z
             if self._current_move_speed_xy != speed or self._current_move_speed_z != speed:
