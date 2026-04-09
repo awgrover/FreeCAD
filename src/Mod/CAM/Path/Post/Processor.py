@@ -44,6 +44,7 @@ from Path.Post.UtilsParse import format_command_line
 from Path.Post.DrillCycleExpander import DrillCycleExpander
 from Path.Post.PostList import Postable
 from Machine.models.machine import MachineFactory
+from Machine.models.machine import OutputUnits
 
 translate = FreeCAD.Qt.translate
 
@@ -194,6 +195,24 @@ class _HeaderBuilder:
             commands.append(Path.Command(f"(Note: {sanitized})"))
 
         return Path.Path(commands)
+
+class PPMachineState(MachineState):
+    """Tracks a little more:
+        Units (G21/G20)
+    """
+    Tracked = MachineState.Tracked + [ "Units" ]
+
+    def __init__(self, initial : None|dict = None):
+        self.Units = "G21" # mm, default internal
+        super().__init__(initial)
+
+    def addCommand(self, command: Path.Command) :
+        oldstate = self.getState()
+        if command.Name in ["G21","G20" ]:
+            self.Units = command.Name
+            return not oldstate == self.getState()
+
+        return super().addCommand(command)
 
 
 #
@@ -1460,7 +1479,6 @@ class PostProcessor:
     def _collect_unit_command(self) -> list:
         """Return G20/G21 unit command based on output_units setting."""
         if self._machine and hasattr(self._machine, "output"):
-            from Machine.models.machine import OutputUnits
 
             if self._machine.output.units == OutputUnits.METRIC:
                 return Path.Command("G21")
@@ -1975,12 +1993,12 @@ class PostProcessor:
     def _convert_job_sections(self, postables):
         """Convert each section to output-code"""
 
-        # We do NOT start at axis 0, we start undefined
-        self.machine_state = MachineState( {k:None for k in MachineState.Tracked} )
-
         job_sections = [] # output chunks
         for section_name, sublist in postables:
             #print(f"#-- Section '{section_name}'")
+
+            # We do NOT start at axis 0, we start undefined
+            self.machine_state = PPMachineState( {k:None for k in PPMachineState.Tracked} )
 
             output_lines = []
 
@@ -2614,6 +2632,7 @@ class PostProcessor:
             """axis parameter unit conversion"""
             # Apply unit conversion based on machine units setting
             is_imperial = False
+            print(f"#-- convert_axis_param (units) mou? {self._machine.output.units}")
             if self._machine and hasattr(self._machine, "output"):
                 from Machine.models.machine import OutputUnits
 
@@ -2627,6 +2646,7 @@ class PostProcessor:
                 converted_value = value / 25.4  # Convert mm to inches
             else:
                 converted_value = value  # Keep as mm
+            print(f"#-- convert_axis_param (units) imperial? {is_imperial} {value} -> {converted_value}")
             return converted_value
 
         def format_axis_param(value):
@@ -2643,6 +2663,7 @@ class PostProcessor:
                 # Convert from mm/sec to mm/min (multiply by 60)
                 feed_value = feed_value * 60.0
 
+            print(f"#-- format_feed_param feedrateconv*60 -> {feed_value}")
             precision = self.values.get("FEED_PRECISION") or 3
             return f"{feed_value:.{precision}f}"
 
