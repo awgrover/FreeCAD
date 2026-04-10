@@ -1385,14 +1385,14 @@ class TestExport2Integration(unittest.TestCase):
             line.strip() for line in gcode.split("\n") if line.strip().startswith("N")
         ]
 
-        self.assertGreaterEqual(len(numbered_lines), 2, "Should have at least 2 numbered lines")
+        self.assertGreaterEqual(len(numbered_lines), 2, "Should have at least 2 numbered lines in\n{gcode}")
         self.assertTrue(
             numbered_lines[0].startswith("N50"),
-            f"First line should be N50, got: {numbered_lines[0]}",
+            f"First line should be N50, got: {numbered_lines[0]} in\n{gcode}",
         )
         self.assertTrue(
             numbered_lines[1].startswith("N55"),
-            f"Second line should be N55, got: {numbered_lines[1]}",
+            f"Second line should be N55, got: {numbered_lines[1]} in\n{gcode}",
         )
 
     def test122_precision_from_config(self):

@@ -476,8 +476,6 @@ class TestDrillCycleExpander(unittest.TestCase):
                 expected.append( Path.Command(f"G0 X10 Y10 Z{final_z} F110") ) # back to original-Z|R
 
             eol="\n"
-            print(f"#== Expected\n{eol.join([x.toGCode()+' '+str(x.Annotations) for x in expected])}\n#==")
-            print(f"#-- Got\n{eol.join([x.toGCode()+' '+str(x.Annotations) for x in result])}\n#--")
 
             result = [ Path.Command(c.Name, c.Parameters) for c in result ]
             as_strings = [x.toGCode() for x in result]
