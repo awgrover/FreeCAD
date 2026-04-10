@@ -1554,19 +1554,6 @@ class PostProcessor:
                 except Exception as e:
                     raise Exception(f"During '{item.item_type}' {item.label}, command [{cmd_i}]: {cmd}") from e
 
-                # FIXME: remove, redundant, add to _filter_for_items
-                if cmd.Name in ("M6", "M06"):
-                    if (
-                        self._machine
-                        and hasattr(self._machine, "processing")
-                        and not self._machine.processing.tool_change
-                    ):
-                        comment_symbol = self.values.get("COMMENT_SYMBOL", "(")
-                        if comment_symbol == "(":
-                            gcode = f"(Tool change suppressed: {gcode})"
-                        else:
-                            gcode = f"{comment_symbol} Tool change" f" suppressed: {gcode}"
-
                 if gcode is not None and gcode.strip():
                     # pp's can return multiple lines for a gcode convert
                     output_lines.extend(gcode.split("\n"))
@@ -1683,7 +1670,7 @@ class PostProcessor:
         return None
 
     def _filter_item(self, item: Postable): # -> None|[str]|[Path.Command]:
-        """Runs the built in list of filter predicates in _filter().
+        """Runs the built in list of filter predicates during _filter_for_items().
             We, and each predicate, returns:
                 None : leave item in place
                 [] : drop item
@@ -1718,7 +1705,7 @@ class PostProcessor:
         return Postable( label=label, **args )
 
     def _filter_for_items(self, postables):
-        """Remove/Replace items as wanted
+        """Remove/Replace items as wanted (filter list in _filter_item())
         Returns a new list of postables
         """
         filter_ct = 0 # need a unique label
@@ -1945,18 +1932,70 @@ class PostProcessor:
             sublist.insert(0, bcnc_postable)
 
 
-    def _filter_comments(self, postables):
-        """Remove comments if unwanted"""
+    def _filter_command(self, command : Path.Command) -> None|list[Path.Command]:
+        """Runs the built in list of filter predicates during _filter_for_command().
+            We, and each predicate, returns:
+                None : leave command in place
+                [] : drop command
+                [Path.Command] : replace command, preferably with just a comment
+            The first predicate that returns not None
+                has it's result returned.
+            Subclasses can override, typically doing their predicates before or after ours.
+        """
+        for pred in (
+            self._comment_filter,
+            self._tool_change_command_filter,
+        ):
+            rez = pred(command)
+            if rez is not None:
+                return rez
+        return None
+
+    def _comment_filter(self, command):
+        """Remove comments if option says to
+        see _filter_command
+        """
         if getattr(getattr(self._machine.output, "comments", None), "enabled", True):
-                return
+            return None
+        else:
+            return [] if command.Name.startswith("(") else None
+
+    def _tool_change_command_filter(self, command):
+        """Remove tool-change command if option says to
+            Cf. _tool_change_filter which removes an entire Postable for the ToolChange
+            This hunts down individual tool-change commands
+        see _filter_command
+        """
+        if getattr(self._machine.processing, "tool_change", True):
+            return None
+        else:
+            return [Path.Command(f"(Tool change suppressed: {command.toGCode()})")] if command.Name in ["M6","M06"] else None
+
+    def _filter_for_commands(self, postables):
+        """Remove/Replace commands as wanted (filter list in _filter_command())
+        """
 
         # FIXME: don't operate on header, safety, etc
         for section_name, sublist in postables:
             for item in sublist:
                 if item.path:
-                    new_commands = [
-                        cmd for cmd in item.Path.Commands if not cmd.Name.startswith("(")
-                    ]
+                    new_commands = []
+                    for cmd in item.Path.Commands:
+
+                        # None means leave alone
+                        # [] means drop
+                        # [Path.Command] means replace
+                        replace  = self._filter_command(item)
+
+                        if replace is None:
+                            new_commands.append(cmd)
+
+                        else:
+                            if replace == []:
+                                # just drop it
+                                continue
+                            else:
+                                new_commands.extend( replace )
                     item.path = Path.Path(new_commands)
 
 
@@ -2074,7 +2113,7 @@ class PostProcessor:
         postables = self._filter_for_items(postables)
         postables = self._add_per_item_blocks(postables)
 
-        self._filter_comments(postables)
+        self._filter_for_commands(postables)
 
         frontmatter = self._collect_frontmatter()
         postables = self._prefix_header_and_frontmatter( postables, gcodeheader, frontmatter)
