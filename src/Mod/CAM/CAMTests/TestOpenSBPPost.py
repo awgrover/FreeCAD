@@ -667,7 +667,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
                 "G98 G99 "
                 "G73X1Y2Z7F100R91Q1 G80 G81X1Y2Z9F100R10 G82X1Y2Z10F100R11P12 G83X1Y2Z11F100R12Q2 "
                 # G85Z1R2 is simple, soon FIXME
-                "M0 M1 M3S1 M5 M6T2 M7 M8 M9 "
+                "M0 M1 M3S1 M5 M6T2 M8 M9 "
                 "(comment)"
                 ).split(" ")
         ]
@@ -698,6 +698,7 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
             - self.post.GCodeUnsupported
             - { "G90", "G91" } # not a Path nor Post thing
             - { "G84", "G85", "G88", "G89" } # tapping, boring
+            - { "M7" }
         )
         untried = set([p for p in all_possible if not re.search(r"0\d$", p)]) - set(
             [p.Name for p in handled_gcode]
@@ -987,7 +988,6 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
 
     @unittest.expectedFailure
     def test_todo(self):
-        self.assertTrue(False, "helix speed projection")
         self.assertTrue(False, "probe")
         self.assertTrue(False, "diff precision for mm|in")
         self.assertTrue(False, "test on machine G20/G21")

@@ -110,7 +110,7 @@ class OpenSBPPost(PostProcessor):
 
     # Others require translation
     # FIXME: is M2/M30 program-end supposed to be in GCODE_SUPPORTED?
-    GCodeTranslate = set("G2 G02 G3 G03 G73 M2 M02 M3 M03 M5 M05 M6 M06 M7 M30".split(" "))
+    GCodeTranslate = set("G2 G02 G3 G03 G73 G81 G83 M2 M02 M3 M03 M5 M05 M6 M06 M30".split(" "))
     GCodeKnown = GCodeTranslate | GCodeNative | GCodeSuppressed
     if GCodeKnown & GCodeUnsupported:
         raise Exception(
@@ -426,19 +426,6 @@ class OpenSBPPost(PostProcessor):
         # Helical arc - need to calculate plunge
         # Get current Z from modal state (default to 0 if not set)
         current_z = self.machine_state.Z
-
-        # Set move speed if feed rate is specified
-        # F is in mm/sec (FreeCAD base units); ShopBot also expects per-second.
-        if "F" in params:
-            speed = params["F"]
-            # Only output if speed changed
-            # FIXME: project xy|z
-            if self._current_move_speed_xy != speed or self._current_move_speed_z != speed:
-                output.append(
-                    f"MS,{self.format_parameter('F',speed)},{self.format_parameter('F',speed)}"
-                )
-                self._current_move_speed_xy = speed
-                self._current_move_speed_z = speed
 
         output.append(
             f"CG,,{self.format_parameter('X',x_val)},{self.format_parameter('Y',y_val)},{self.format_parameter('X',i_val)},{self.format_parameter('Y',j_val)},T,{direction},{self.format_parameter('Z',plunge)}"
