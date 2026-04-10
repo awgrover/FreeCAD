@@ -1442,36 +1442,6 @@ class PostProcessor:
             ]
         return []
 
-    def _collect_header_lines(self, gcodeheader) -> list:
-        """Build header comment lines from the gcodeheader object.
-
-        Gated on machine.output.output_header. Returns formatted comment
-        strings using the configured COMMENT_SYMBOL.
-        """
-
-        # FIXME: change to Path.Command's
-
-        header_enabled = True
-        if self._machine and hasattr(self._machine, "output"):
-            header_enabled = self._machine.output.output_header
-
-        header_lines = []
-        if header_enabled:
-            header_commands = gcodeheader.Path.Commands if hasattr(gcodeheader, "Path") else []
-            comment_symbol = self.values.get("COMMENT_SYMBOL", "(")
-            for cmd in header_commands:
-                if cmd.Name.startswith("("):
-                    comment_text = (
-                        cmd.Name[1:-1]
-                        if cmd.Name.startswith("(") and cmd.Name.endswith(")")
-                        else cmd.Name[1:]
-                    )
-                    if comment_symbol == "(":
-                        header_lines.append(f"({comment_text})")
-                    else:
-                        header_lines.append(f"{comment_symbol} {comment_text}")
-        return header_lines
-
     def _collect_preamble_lines(self) -> list:
         """Return preamble lines from machine configuration."""
         return self._get_property_lines("preamble")
