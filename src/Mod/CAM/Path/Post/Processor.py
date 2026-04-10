@@ -1004,6 +1004,7 @@ class PostProcessor:
                 elif item.Path:
                     new_commands = []
                     for command in item.Path.Commands:
+
                         # don't count comments
                         if command.Name.startswith("("):
                             new_commands.append( command )
@@ -1521,6 +1522,7 @@ class PostProcessor:
         in_rotary_group = False
 
         for cmd_i, cmd in enumerate(item.path.Commands):
+
             try:
                 has_rotary = any(param in cmd.Parameters for param in ["A", "B", "C"])
 
@@ -1589,7 +1591,7 @@ class PostProcessor:
 
         return None
 
-    def _optimize_gcode(self, header_lines, output_lines) -> str:
+    def _optimize_gcode(self, last_header_line, output_lines) -> str:
         """Apply G-code optimizations and produce a final string.
 
         Separates header comments from body, applies deduplication,
@@ -1606,7 +1608,7 @@ class PostProcessor:
         if not output_lines:
             return ""
 
-        num_header_lines = len(header_lines)
+        num_header_lines = last_header_line + 1
         header_part = output_lines[:num_header_lines]
         body_part = output_lines[num_header_lines:]
 
@@ -1689,21 +1691,23 @@ class PostProcessor:
 
     def _smart_postable(self, 
         label:str, 
-        contents: str|list[str]|Path.Command|list[Path.Command],
+        contents: str|list[str]|Path.Command|list[Path.Command]|list[Any],
         extra_data = {},
     ) -> Postable:
         """Makes a Postable with the right kind of args and item_type
             for the supported inputs.
+            A postable contents=[] is fine, it's just a marker with no content
             extra_data is added to the `data`
         """
         if isinstance( contents, str ):
             args = { "item_type" : "str", "data" : {"str": contents}, "path":None, "source":None }
         elif isinstance( contents, Path.Command ):
             args = { "item_type" : "command", "data" : {}, "path" : Path.Path( [contents] ), "source":None}
+        elif contents == [] or isinstance( contents[0], Path.Command ):
+            # A postable of "command" with empty .path is fine, it's just a marker with no content
+            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( contents ), "source":None}
         elif isinstance( contents[0], str ):
             args = { "item_type" : "str", "data" : {"str": "\n".join(contents)}, "path":None, "source":None }
-        elif isinstance( contents[0], Path.Command ):
-            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( contents ), "source":None}
         else:
             raise Exception(f"Can't smartly make a Postable for label '{label}'\n\tfor contents: {contents}")
 
@@ -1892,6 +1896,7 @@ class PostProcessor:
                 self._smart_postable("Post: pre_job", pre_job_lines)
             )
 
+        front_matter.append( self._smart_postable("Post: endfrontmatter", [] ) )
         return front_matter
 
     def _header_object_to_commands(self, gcodeheader):
@@ -2025,6 +2030,7 @@ class PostProcessor:
         """Convert each section to output-code"""
 
         job_sections = [] # output chunks
+        header_last_line = -1 # updated when we process Postable.label == "Post: endfrontmatter"
         for section_name, sublist in postables:
             #print(f"#-- Section '{section_name}'")
 
@@ -2041,7 +2047,7 @@ class PostProcessor:
             seen_items = set()
             for item_i, item in enumerate(sublist):
                 # DEBUG
-                print(f"#----  Postable <{item.label}> {item.item_type}: {item}")
+                #print(f"#----  Postable <{item.label}> {item.item_type}: {item}")
                 if item.path and len(item.path.Commands) < 10: # DEBUG
                     paths = [i.toGCode() for i in item.path.Commands] if item.path and item.path.Commands else []
                     #print(f"#--     paths {paths}")
@@ -2061,13 +2067,16 @@ class PostProcessor:
                 except Exception as e:
                     raise Exception(f"During section '{section_name}' item {item_i}") from e
 
+                if item.label == "Post: endfrontmatter":
+                    header_last_line = len(output_lines) - 1
+
             # We are now in output STRING world, the output may not be gcode at all!
 
             # ===== STAGE 4: G-CODE OPTIMIZATION =====
 
             # Some sections/postables shouldn't be messed with: look at Postable.data['noedit']
-            # FIXME: get header range from Postable header
-            output_lines = self._optimize_gcode("", output_lines)
+            # FIXME: don't optimize bcnc and other endmatter?
+            output_lines = self._optimize_gcode(header_last_line, output_lines)
 
             output_string = "\n".join(output_lines)
 
@@ -2697,7 +2706,6 @@ class PostProcessor:
                 # Convert from mm/sec to mm/min (multiply by 60)
                 feed_value = feed_value * 60.0
 
-            print(f"#-- format_feed_param feedrateconv*60 -> {feed_value}")
             precision = self.values.get("FEED_PRECISION") or 3
             return f"{feed_value:.{precision}f}"
 
