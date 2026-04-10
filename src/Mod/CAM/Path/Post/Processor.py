@@ -1424,7 +1424,7 @@ class PostProcessor:
                         if cmd.Name in ("M6", "M06") and "T" in cmd.Parameters:
                             tool_num = cmd.Parameters["T"]
                             g43_cmd = Path.Command("G43", {"H": tool_num})
-                            g43_cmd.Annotations = {"tool_length_offset": True}
+                            g43_cmd.Annotations = {"tool_length_offset": True} # FIXME: not used
                             commands_with_g43.append(g43_cmd)
                             Path.Log.debug(
                                 f"Added G43 H{tool_num} after M6 in operation {item.label}"
@@ -1969,11 +1969,21 @@ class PostProcessor:
         for pred in (
             self._comment_filter,
             self._tool_change_command_filter,
+            self._tlo_filter,
         ):
             rez = pred(command)
             if rez is not None:
                 return rez
         return None
+
+    def _tlo_filter(self, command):
+        """Remove comments if option says to
+        see _filter_command
+        """
+        if getattr(self._machine.output, "output_tool_length_offset", True):
+            return None
+        else:
+            return [] if command.Name == "M43" else None
 
     def _comment_filter(self, command):
         """Remove comments if option says to
@@ -2805,13 +2815,6 @@ class PostProcessor:
                 # Update modal state
                 self._modal_state[parameter] = params[parameter]
 
-        # Handle tool length offset (G43) suppression
-        # FIXME: lift to stage 2
-        if command_name in ("G43",):
-            if not self.values.get("OUTPUT_TOOL_LENGTH_OFFSET", True): # FIXME: lift to suppress time
-                # Tool length offset disabled - suppress G43 command
-                return None
-
         # Format the command line
         formatted_line = format_command_line(self.values, command_line)
 
@@ -2906,7 +2909,6 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize fixture handling.
         """
-        # FIXME: Not a move
         return self._convert_move(command)
 
     def _convert_modal_command(self, command: Path.Command) -> str:
