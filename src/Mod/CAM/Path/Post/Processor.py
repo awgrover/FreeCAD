@@ -1687,21 +1687,27 @@ class PostProcessor:
                 return rez
         return None
 
-    def _smart_postable(self, label:str, contents: str|list[str]|Path.Command|list[Path.Command] ) -> Postable:
+    def _smart_postable(self, 
+        label:str, 
+        contents: str|list[str]|Path.Command|list[Path.Command],
+        extra_data = {},
+    ) -> Postable:
         """Makes a Postable with the right kind of args and item_type
-            for the supported inputs
+            for the supported inputs.
+            extra_data is added to the `data`
         """
         if isinstance( contents, str ):
             args = { "item_type" : "str", "data" : {"str": contents}, "path":None, "source":None }
         elif isinstance( contents, Path.Command ):
-            args = { "item_type" : "command", "path" : Path.Path( [contents] ), "source":None}
+            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( [contents] ), "source":None}
         elif isinstance( contents[0], str ):
             args = { "item_type" : "str", "data" : {"str": "\n".join(contents)}, "path":None, "source":None }
         elif isinstance( contents[0], Path.Command ):
-            args = { "item_type" : "command", "path" : Path.Path( contents ), "source":None}
+            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( contents ), "source":None}
         else:
             raise Exception(f"Can't smartly make a Postable for label '{label}'\n\tfor contents: {contents}")
 
+        args['data'].update(extra_data)
         return Postable( label=label, **args )
 
     def _filter_for_items(self, postables):
@@ -1713,6 +1719,10 @@ class PostProcessor:
         for section_name, sublist in postables:
             new_sublist = []
             for item in sublist:
+                if item.data.get('noedit', False):
+                    # marked block, don't change
+                    new_sublist.append(item)
+                    continue
 
                 # None means leave alone
                 # [] means drop
@@ -1733,7 +1743,7 @@ class PostProcessor:
                             self._smart_postable(f"Post: {section_name} {item.item_type} {item.label}{filter_ct} filtered", replace)
                         )
 
-            new_sections.append( (section_name, new_sublist.copy()) )
+            new_sections.append( (section_name, new_sublist.copy()) ) # FIXME: no copy?
 
         return new_sections
 
@@ -1829,6 +1839,10 @@ class PostProcessor:
         last_command = Path.Command() # empty
         for section_name, sublist in postables:
             for item in sublist:
+                if item.data.get('noedit', False):
+                    # marked block, don't change
+                    continue
+
                 if item.item_type == "str":
                     # "gcode" could be in there, so our state is invalid
                     machine_state.setState( {k:None for k in MachineState.Tracked} )
@@ -1899,7 +1913,12 @@ class PostProcessor:
 
             header_commands = self._header_object_to_commands(gcodeheader)
             if header_commands:
-                new_sublist.append( self._smart_postable("Post: header", self._header_object_to_commands(gcodeheader)) )
+                new_sublist.append( 
+                    self._smart_postable(
+                        "Post: header", self._header_object_to_commands(gcodeheader), 
+                        extra_data={"noedit":True}
+                    )
+                )
 
             new_sublist.extend( frontmatter )
 
@@ -1918,7 +1937,7 @@ class PostProcessor:
             return
         if commands:=self._bcnc_postamble_commands:
             _,sublist = postables[-1]
-            bcnc_postable = self._smart_postable("Post: bcnc postamble", commands)
+            bcnc_postable = self._smart_postable("Post: bcnc postamble", commands, extra_data={"noedit":True})
             sublist.append( bcnc_postable )
 
 
@@ -1927,7 +1946,7 @@ class PostProcessor:
         if not postables:
             return
         if safety_lines:=self._get_property_lines("safetyblock"):
-            bcnc_postable = self._smart_postable("Post: safetyblock", safety_lines)
+            bcnc_postable = self._smart_postable("Post: safetyblock", safety_lines, extra_data={"noedit":True})
             _, sublist = postables[0]
             sublist.insert(0, bcnc_postable)
 
@@ -1975,9 +1994,12 @@ class PostProcessor:
         """Remove/Replace commands as wanted (filter list in _filter_command())
         """
 
-        # FIXME: don't operate on header, safety, etc
         for section_name, sublist in postables:
             for item in sublist:
+                if item.data.get('noedit', False):
+                    # marked block, don't change
+                    continue
+
                 if item.path:
                     new_commands = []
                     for cmd in item.Path.Commands:
@@ -2019,7 +2041,7 @@ class PostProcessor:
             seen_items = set()
             for item_i, item in enumerate(sublist):
                 # DEBUG
-                #print(f"#----  Postable <{item.label}> {item.item_type}: {item}")
+                print(f"#----  Postable <{item.label}> {item.item_type}: {item}")
                 if item.path and len(item.path.Commands) < 10: # DEBUG
                     paths = [i.toGCode() for i in item.path.Commands] if item.path and item.path.Commands else []
                     #print(f"#--     paths {paths}")
@@ -2027,6 +2049,8 @@ class PostProcessor:
                 if item.label in seen_items:
                     Path.Log.debug( f"Internal: Postables, in a section ('{section_name}'), should have unique .label. Saw .label twice <{item.label}>. Second looks like '{item.item_type}': {item}")
                 seen_items.add( item.label )
+
+                # FIXME: skip "noedit" Postables? or let pp see them?
 
                 # NB: We are not in pure Path.Command world anymore
                 # Parameters (axis) might have been made redundant
@@ -2040,7 +2064,8 @@ class PostProcessor:
             # We are now in output STRING world, the output may not be gcode at all!
 
             # ===== STAGE 4: G-CODE OPTIMIZATION =====
-            # Some sections/postables shouldn't be messed with: FIXME
+
+            # Some sections/postables shouldn't be messed with: look at Postable.data['noedit']
             # FIXME: get header range from Postable header
             output_lines = self._optimize_gcode("", output_lines)
 
@@ -2114,6 +2139,8 @@ class PostProcessor:
         postables = self._add_per_item_blocks(postables)
 
         self._filter_for_commands(postables)
+
+        # Add some blocks, that we didn't want the above messing with
 
         frontmatter = self._collect_frontmatter()
         postables = self._prefix_header_and_frontmatter( postables, gcodeheader, frontmatter)
@@ -2641,7 +2668,6 @@ class PostProcessor:
             """axis parameter unit conversion"""
             # Apply unit conversion based on machine units setting
             is_imperial = False
-            print(f"#-- convert_axis_param (units) mou? {self._machine.output.units}")
             if self._machine and hasattr(self._machine, "output"):
                 from Machine.models.machine import OutputUnits
 
@@ -2655,7 +2681,6 @@ class PostProcessor:
                 converted_value = value / 25.4  # Convert mm to inches
             else:
                 converted_value = value  # Keep as mm
-            print(f"#-- convert_axis_param (units) imperial? {is_imperial} {value} -> {converted_value}")
             return converted_value
 
         def format_axis_param(value):

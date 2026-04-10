@@ -1583,9 +1583,7 @@ class TestExport2Integration(unittest.TestCase):
             Path.Command("G0 X1 Y1 Z1 F50"), # elided
             ]
         ):
-            machine = self._create_machine(commands=False, parameters=True)
-            print(f"## machin.output {machine.output}")
-            print(f"##     dup command {machine.output.duplicates.commands}")
+            machine = self._create_machine(commands=False, parameters=True, header=True)
             results = self._run_export2(machine)
             gcode = self._get_all_gcode(results)
             lines = gcode.split("\n")
