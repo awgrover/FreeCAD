@@ -174,7 +174,7 @@ class GenericPlasma(PostProcessor):
         Path.Log.debug("Generic Plasma post processor initialized.")
 
         # Torch commands
-        self.TorchIgniteCommand = Path.Command("M3")
+        self.TorchIgniteCommand = Path.Command("M3", {"S":1})
         self.TorchExtinguishCommand = Path.Command("M5")
 
         # State tracking for plasma-specific features

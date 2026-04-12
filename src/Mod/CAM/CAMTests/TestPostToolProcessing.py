@@ -29,9 +29,6 @@ from Machine.models.machine import Machine
 import Path.Tool.Controller as PathToolController
 from Path.Tool.toolbit import ToolBit
 import Path.Main.Job as PathJob
-import CAMTests.PostTestMocks as PostTestMocks
-from Path.Post.Processor import PostProcessorFactory
-
 
 
 class TestToolLengthOffset(unittest.TestCase):
@@ -51,6 +48,9 @@ class TestToolLengthOffset(unittest.TestCase):
         machine = Machine("Test Machine")
         machine.output.output_tool_length_offset = False
 
+        import CAMTests.PostTestMocks as PostTestMocks
+        from Path.Post.Processor import PostProcessorFactory
+
         job, profile_op, tool_controller = (
             PostTestMocks.create_default_job_with_operation()
         )
@@ -63,12 +63,11 @@ class TestToolLengthOffset(unittest.TestCase):
         profile_op.Path = Path.Path( [ Path.Command("G43", {"H": 1}) ] )
 
         # Convert G43 command
-        processor._machine.output.output_tool_length_offset = False
         result = processor.export2()[0][1]
 
         # Should return None (suppressed)
         self.assertNotIn(
-            "G43", result, f"G43 command should be suppressed when output_tool_length_offset is False in\n{result}"
+            "G43", result, f"G43 command should be suppressed when output_tool_length_offset is False\n{result}"
         )
 
     def test_g43_output_enabled(self):
@@ -77,6 +76,9 @@ class TestToolLengthOffset(unittest.TestCase):
         machine = Machine("Test Machine")
         machine.output.output_tool_length_offset = True
 
+        import CAMTests.PostTestMocks as PostTestMocks
+        from Path.Post.Processor import PostProcessorFactory
+
         job, profile_op, tool_controller = (
             PostTestMocks.create_default_job_with_operation()
         )
@@ -91,6 +93,7 @@ class TestToolLengthOffset(unittest.TestCase):
         # Convert G43 command
         result = processor.export2()[0][1]
 
+        # Should return the G43 command
         self.assertIn("G43", result, "Result should contain G43 command")
         self.assertIn("H1", result, "Result should contain H parameter")
 
@@ -281,7 +284,7 @@ class TestToolProcessing(unittest.TestCase):
 
         tc2 = PathToolController.Create("TC_Test_Tool2", tool2, 2)
         tc2.Label = "TC: 3mm Endmill"
-        self.job.Proxy.addToolController(tc2)
+        self.job.addObject(tc2)
 
         # Create a second operation using the second tool
         # First move after tool change has X, Y, and Z components
@@ -359,7 +362,7 @@ class TestToolProcessing(unittest.TestCase):
 
         tc2 = PathToolController.Create("TC_Test_Tool2", tool2, 2)
         tc2.Label = "TC: 3mm Endmill"
-        self.job.Proxy.addToolController(tc2)
+        self.job.addObject(tc2)
 
         # Create a second operation using the second tool
         profile_op2 = self.doc.addObject("Path::FeaturePython", "TestProfile2")
@@ -454,7 +457,7 @@ class TestToolProcessing(unittest.TestCase):
 
         tc2 = PathToolController.Create("TC_Second_Tool", tool, 2)
         tc2.Label = "TC: 3mm Endmill"
-        self.job.Proxy.addToolController(tc2)
+        self.job.addObject(tc2)
 
         # Create a second operation using the second tool
         profile_op2 = self.doc.addObject("Path::FeaturePython", "TestProfile2")
@@ -479,7 +482,7 @@ class TestToolProcessing(unittest.TestCase):
             self.assertGreater(len(all_output), 0, "Should have non-empty output")
 
             self.assertIn(
-                "(pretoolchange)", all_output, "Pre-tool-change block should appear in output"
+                "(pretoolchange)", all_output, f"Pre-tool-change block should appear in output\n{all_output}"
             )
             self.assertIn(
                 "(posttoolchange)", all_output, "Post-tool-change block should appear in output"

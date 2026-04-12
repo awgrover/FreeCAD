@@ -931,7 +931,7 @@ class TestJobPropertyOverrides(unittest.TestCase):
 
         tc = PathToolController.Create("TC_Test_Tool", tool, 1)
         tc.Label = "TC: 6mm Endmill"
-        cls.job.Proxy.addToolController(tc)
+        cls.job.addObject(tc)
 
         # Create operation
         profile_op = cls.doc.addObject("Path::FeaturePython", "TestProfile")
@@ -1078,7 +1078,7 @@ class TestJobPropertyOverrides(unittest.TestCase):
         # Add M3/M4 commands to trigger plasma behavior
         plasma_commands = [
             Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 5.0}),
-            Path.Command("M3", {}),  # Torch on - should trigger pierce delay
+            Path.Command("M3", {"S":1}),  # Torch on - should trigger pierce delay
             Path.Command("G1", {"X": 100.0, "Y": 0.0, "Z": -5.0, "F": 100.0}),
             Path.Command("M5", {}),  # Torch off
             Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 5.0}),

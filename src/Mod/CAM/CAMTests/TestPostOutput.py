@@ -136,7 +136,7 @@ class TestFileNameGenerator(unittest.TestCase):
 
         tc = PathToolController.Create("TC_Test_Tool", tool, 5)
         tc.Label = "TC: 6mm Endmill"
-        cls.job.Proxy.addToolController(tc)
+        cls.job.addObject(tc)
 
         # Create a simple mock operation for testing operation-related substitutions
         profile_op = cls.doc.addObject("Path::FeaturePython", "TestProfile")
@@ -455,7 +455,7 @@ class TestExport2Integration(unittest.TestCase):
 
         tc = PathToolController.Create("TC_Test_Tool", tool, 1)
         tc.Label = "TC: 6mm Endmill"
-        cls.job.Proxy.addToolController(tc)
+        cls.job.addObject(tc)
 
         profile_op = cls.doc.addObject("Path::FeaturePython", "TestProfile")
         profile_op.Label = "TestProfile"
@@ -481,7 +481,7 @@ class TestExport2Integration(unittest.TestCase):
 
     def _create_machine(self, **output_options):
         """Helper to create a machine with specified output options."""
-        from Machine.models.machine import Machine, OutputUnits, Toolhead, ToolheadType
+        from Machine.models.machine import OutputUnits, Toolhead, ToolheadType
 
         machine = Machine.create_3axis_config()
         machine.name = "TestMachine"
@@ -751,11 +751,11 @@ class TestExport2Integration(unittest.TestCase):
 
     def test010_export2_returns_gcode_sections(self):
         """Test that export2() returns a non-empty list of (name, gcode) tuples."""
-        from Path.Post.Processor import PostProcessor
 
-        post = PostProcessor(self.job, "", "", "mm")
-        post._machine = Machine("Test Machine")
-        results = post.export2()
+        machine = self._create_machine(
+            output_header=True, include_machine_name=True, line_numbers=False
+        )
+        results = self._run_export2(machine)
 
         self.assertIsNotNone(results, "export2 should return results")
         self.assertIsInstance(results, list)
@@ -1385,14 +1385,14 @@ class TestExport2Integration(unittest.TestCase):
             line.strip() for line in gcode.split("\n") if line.strip().startswith("N")
         ]
 
-        self.assertGreaterEqual(len(numbered_lines), 2, "Should have at least 2 numbered lines")
+        self.assertGreaterEqual(len(numbered_lines), 2, "Should have at least 2 numbered lines in\n{gcode}")
         self.assertTrue(
             numbered_lines[0].startswith("N50"),
-            f"First line should be N50, got: {numbered_lines[0]}",
+            f"First line should be N50, got: {numbered_lines[0]} in\n{gcode}",
         )
         self.assertTrue(
             numbered_lines[1].startswith("N55"),
-            f"Second line should be N55, got: {numbered_lines[1]}",
+            f"Second line should be N55, got: {numbered_lines[1]} in\n{gcode}",
         )
 
     def test122_precision_from_config(self):
@@ -1575,9 +1575,26 @@ class TestExport2Integration(unittest.TestCase):
             self.assertNotIn("Y", second_commands[0], "Y should be suppressed (unchanged)")
             self.assertNotIn("Z", second_commands[0], "Z should be suppressed (unchanged)")
 
+    def test128_1_redundant_commands(self):
+        """Does an entire gcode get removed if redundant"""
+        with self._modify_operation_path(
+            [
+            Path.Command("G0 X1 Y1 Z1 F50"), # 
+            Path.Command("G0 X1 Y1 Z1 F50"), # elided
+            ]
+        ):
+            machine = self._create_machine(commands=False, parameters=True, header=True)
+            results = self._run_export2(machine)
+            gcode = self._get_all_gcode(results)
+            lines = gcode.split("\n")
+            
+            g0s = [ l for l in lines if l.startswith("G0 ") ]
+            self.assertEqual( ['G0 X1.000 Y1.000 Z1.000 F3000.000'], g0s )
+
     def test129_duplicate_commands_suppressed(self):
         """
         Test that duplicate G-code commands are suppressed when duplicates.commands=False.
+        This is traditional "modal": can suppress the gcode-name
 
         Expected:
             BEFORE: G1 X10 Y10
@@ -1670,8 +1687,8 @@ class TestExport2Integration(unittest.TestCase):
             results = self._run_export2(machine)
             gcode = "\n".join(g for _, g in results)
 
-            self.assertIn("(prerotary)", gcode, "Pre-rotary block should appear")
-            self.assertIn("(Postrotary)", gcode, "Post-rotary block should appear")
+            self.assertIn("(prerotary)", gcode, f"Pre-rotary block should appear\n{gcode}")
+            self.assertIn("(Postrotary)", gcode, f"Post-rotary block should appear\n{gcode}")
 
             self.assertEqual(
                 gcode.count("(prerotary)"),
