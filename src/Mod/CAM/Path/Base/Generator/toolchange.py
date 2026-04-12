@@ -64,9 +64,11 @@ def generate(toolnumber, toollabel, spindlespeed=0, spindledirection=SpindleDire
 
     commands.append(Path.Command(f"({toollabel})"))
     tc = Path.Command("M6", {"T": int(toolnumber)})
-    tc.addAnnotations({
-        "label": toollabel, # FIXME: want the Tool name (not tc name)
-    })
+    tc.addAnnotations(
+        {
+            "label": toollabel,  # FIXME: want the Tool name (not tc name)
+        }
+    )
 
     commands.append(tc)
 

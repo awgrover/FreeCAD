@@ -268,7 +268,7 @@ M30
         gcode = self.post.export()[0][1]
         result = gcode.splitlines()
         expected = "G0 X10.000 Y20.000 Z30.000"
-        self.assertTrue( re.search(r'^N\d+ +'+expected, gcode, flags=re.M), gcode)
+        self.assertTrue(re.search(r"^N\d+ +" + expected, gcode, flags=re.M), gcode)
 
     def test_pre_amble(self):
         """

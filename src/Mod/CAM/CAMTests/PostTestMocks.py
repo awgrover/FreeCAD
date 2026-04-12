@@ -35,6 +35,7 @@ class MockTool:
 
 from Path.Base.Generator import toolchange
 
+
 class MockToolController:
     """Mock ToolController for operations."""
 
@@ -43,7 +44,7 @@ class MockToolController:
         tool_number=1,
         label="TC: Default Tool",
         spindle_speed=1000,
-        spindle_dir= toolchange.SpindleDirection.CW,
+        spindle_dir=toolchange.SpindleDirection.CW,
     ):
         self.Tool = MockTool()
         self.ToolNumber = tool_number
@@ -56,7 +57,7 @@ class MockToolController:
         self.Path = Path.Path()
 
         self.Path.addCommands(
-            #[Path.Command(f"M6 T{tool_number}"), Path.Command(f"M3 S{spindle_speed}")] # FIXME: force m3?
+            # [Path.Command(f"M6 T{tool_number}"), Path.Command(f"M3 S{spindle_speed}")] # FIXME: force m3?
             toolchange.generate(
                 toolnumber=tool_number,
                 toollabel=label,

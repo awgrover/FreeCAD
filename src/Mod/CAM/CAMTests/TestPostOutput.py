@@ -1385,7 +1385,9 @@ class TestExport2Integration(unittest.TestCase):
             line.strip() for line in gcode.split("\n") if line.strip().startswith("N")
         ]
 
-        self.assertGreaterEqual(len(numbered_lines), 2, "Should have at least 2 numbered lines in\n{gcode}")
+        self.assertGreaterEqual(
+            len(numbered_lines), 2, "Should have at least 2 numbered lines in\n{gcode}"
+        )
         self.assertTrue(
             numbered_lines[0].startswith("N50"),
             f"First line should be N50, got: {numbered_lines[0]} in\n{gcode}",
@@ -1579,17 +1581,17 @@ class TestExport2Integration(unittest.TestCase):
         """Does an entire gcode get removed if redundant"""
         with self._modify_operation_path(
             [
-            Path.Command("G0 X1 Y1 Z1 F50"), # 
-            Path.Command("G0 X1 Y1 Z1 F50"), # elided
+                Path.Command("G0 X1 Y1 Z1 F50"),  #
+                Path.Command("G0 X1 Y1 Z1 F50"),  # elided
             ]
         ):
             machine = self._create_machine(commands=False, parameters=True, header=True)
             results = self._run_export2(machine)
             gcode = self._get_all_gcode(results)
             lines = gcode.split("\n")
-            
-            g0s = [ l for l in lines if l.startswith("G0 ") ]
-            self.assertEqual( ['G0 X1.000 Y1.000 Z1.000 F3000.000'], g0s )
+
+            g0s = [l for l in lines if l.startswith("G0 ")]
+            self.assertEqual(["G0 X1.000 Y1.000 Z1.000 F3000.000"], g0s)
 
     def test129_duplicate_commands_suppressed(self):
         """

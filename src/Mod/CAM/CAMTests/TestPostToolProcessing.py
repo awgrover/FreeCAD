@@ -51,23 +51,23 @@ class TestToolLengthOffset(unittest.TestCase):
         import CAMTests.PostTestMocks as PostTestMocks
         from Path.Post.Processor import PostProcessorFactory
 
-        job, profile_op, tool_controller = (
-            PostTestMocks.create_default_job_with_operation()
-        )
+        job, profile_op, tool_controller = PostTestMocks.create_default_job_with_operation()
 
         # Create post processor
         processor = PostProcessorFactory.get_post_processor(job, "test")
         processor._machine = machine
 
         # Create a simple path with G43 command
-        profile_op.Path = Path.Path( [ Path.Command("G43", {"H": 1}) ] )
+        profile_op.Path = Path.Path([Path.Command("G43", {"H": 1})])
 
         # Convert G43 command
         result = processor.export2()[0][1]
 
         # Should return None (suppressed)
         self.assertNotIn(
-            "G43", result, f"G43 command should be suppressed when output_tool_length_offset is False\n{result}"
+            "G43",
+            result,
+            f"G43 command should be suppressed when output_tool_length_offset is False\n{result}",
         )
 
     def test_g43_output_enabled(self):
@@ -79,16 +79,14 @@ class TestToolLengthOffset(unittest.TestCase):
         import CAMTests.PostTestMocks as PostTestMocks
         from Path.Post.Processor import PostProcessorFactory
 
-        job, profile_op, tool_controller = (
-            PostTestMocks.create_default_job_with_operation()
-        )
+        job, profile_op, tool_controller = PostTestMocks.create_default_job_with_operation()
 
         # Create post processor
         processor = PostProcessorFactory.get_post_processor(job, "test")
         processor._machine = machine
 
         # Create a simple path with G43 command
-        profile_op.Path = Path.Path( [ Path.Command("G43", {"H": 1}) ] )
+        profile_op.Path = Path.Path([Path.Command("G43", {"H": 1})])
 
         # Convert G43 command
         result = processor.export2()[0][1]
@@ -482,7 +480,9 @@ class TestToolProcessing(unittest.TestCase):
             self.assertGreater(len(all_output), 0, "Should have non-empty output")
 
             self.assertIn(
-                "(pretoolchange)", all_output, f"Pre-tool-change block should appear in output\n{all_output}"
+                "(pretoolchange)",
+                all_output,
+                f"Pre-tool-change block should appear in output\n{all_output}",
             )
             self.assertIn(
                 "(posttoolchange)", all_output, "Post-tool-change block should appear in output"
