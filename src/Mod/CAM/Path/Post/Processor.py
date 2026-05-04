@@ -1708,6 +1708,7 @@ class PostProcessor:
         label:str, 
         contents: str|list[str]|Path.Command|list[Path.Command]|list[Any],
         extra_data = {},
+        source = None,
     ) -> Postable:
         """Makes a Postable with the right kind of args and item_type
             for the supported inputs.
@@ -1715,14 +1716,14 @@ class PostProcessor:
             extra_data is added to the `data`
         """
         if isinstance( contents, str ):
-            args = { "item_type" : "str", "data" : {"str": contents}, "path":None, "source":None }
+            args = { "item_type" : "str", "data" : {"str": contents}, "path":None, "source":source }
         elif isinstance( contents, Path.Command ):
-            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( [contents] ), "source":None}
+            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( [contents] ), "source":source}
         elif contents == [] or isinstance( contents[0], Path.Command ):
             # A postable of "command" with empty .path is fine, it's just a marker with no content
-            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( contents ), "source":None}
+            args = { "item_type" : "command", "data" : {}, "path" : Path.Path( contents ), "source":source}
         elif isinstance( contents[0], str ):
-            args = { "item_type" : "str", "data" : {"str": "\n".join(contents)}, "path":None, "source":None }
+            args = { "item_type" : "str", "data" : {"str": "\n".join(contents)}, "path":None, "source":source }
         else:
             raise Exception(f"Can't smartly make a Postable for label '{label}'\n\tfor contents: {contents}")
 
@@ -1966,9 +1967,9 @@ class PostProcessor:
         if not postables:
             return
         if safety_lines:=self._get_property_lines("safetyblock"):
-            bcnc_postable = self._smart_postable("Post: safetyblock", safety_lines, extra_data={"noedit":True})
+            safety_postable = self._smart_postable("Post: safetyblock", safety_lines, extra_data={"noedit":True})
             _, sublist = postables[0]
-            sublist.insert(0, bcnc_postable)
+            sublist.insert(0, safety_postable)
 
 
     def _filter_command(self, command : Path.Command) -> None|list[Path.Command]:
@@ -1992,7 +1993,7 @@ class PostProcessor:
         return None
 
     def _tlo_filter(self, command):
-        """Remove comments if option says to
+        """Remove tlo if option says to
         see _filter_command
         """
         if getattr(self._machine.output, "output_tool_length_offset", True):
@@ -2037,7 +2038,7 @@ class PostProcessor:
                         # None means leave alone
                         # [] means drop
                         # [Path.Command] means replace
-                        replace  = self._filter_command(item)
+                        replace  = self._filter_command(cmd)
 
                         if replace is None:
                             new_commands.append(cmd)
@@ -2063,11 +2064,6 @@ class PostProcessor:
             self.machine_state = PPMachineState( {k:None for k in PPMachineState.Tracked} )
 
             output_lines = []
-
-            # FIXME: inclusion logic
-            #gcode_lines = self._build_section_prefix(
-            #    header_lines, preamble_lines, unit_command, pre_job_lines
-            #)
 
             seen_items = set()
             for item_i, item in enumerate(sublist):

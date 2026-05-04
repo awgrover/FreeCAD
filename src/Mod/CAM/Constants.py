@@ -171,6 +171,7 @@ GCODE_SUPPORTED = (
     + GCODE_RETURN_R
     + GCODE_TOOL_LENGTH_OFFSET
     + GCODE_FIXTURES
+    # FIXME: MCODE_END_RESET & MCODE_END?
 )
 
 # All supported M-codes for generic post processor

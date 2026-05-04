@@ -894,6 +894,14 @@ class TestOpenSBPPost(PathTestUtils.PathTestBase):
         self.no_unnumbered("M8", gcode.splitlines())
         self.no_unnumbered("M9", gcode.splitlines())
 
+    def test_end_command(self):
+        for gcode in Constants.MCODE_END + Constants.MCODE_END_RESET:
+            result = self.post._convert_program_control( Path.Command(gcode) )
+
+            self.assertNotIn(gcode, result)
+            self.assertEqual("END", result)
+            
+
     @unittest.expectedFailure
     def test_programend_numbered(self):
         """

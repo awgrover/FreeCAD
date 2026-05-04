@@ -120,6 +120,7 @@ class OpenSBPPost(PostProcessor):
     # gcodes that are supported but shouldn't be used by CAM or Post/Processing
     GCodeDontUse = GCodeKnown - set(
         Constants.GCODE_SUPPORTED + Constants.MCODE_SUPPORTED + Constants.GCODE_NON_CONFORMING
+        + Constants.MCODE_END # FIXME: not in supported
     )
 
     # What we should support
@@ -507,11 +508,14 @@ class OpenSBPPost(PostProcessor):
 
         return "\n".join(output)
 
-        def _convert_program_control(self, command: Path.Command) -> str:
-            if command.Name in (Constants.MCODE_END + Constants.MCODE_END_RESET):
-                return "END"
-            else:
-                return super()._convert_program_control(command)
+    def _convert_probe(self, command: Path.Command) -> str:
+        return super()._convert_probe(command)
+
+    def _convert_program_control(self, command: Path.Command) -> str:
+        if command.Name in (Constants.MCODE_END + Constants.MCODE_END_RESET):
+            return "END"
+        else:
+            return super()._convert_program_control(command)
 
     def _optimize_gcode(self, header_lines, gcode_lines) -> str:
         # There may be opensbp in the stream
